@@ -1,0 +1,397 @@
+"""
+Cog implementing discord interface of Stalk Market Predictions
+Part of Stalk Market Bot.
+"""
+
+import logging
+from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Type, Any
+from datetime import datetime
+
+import discord
+from discord.ext import commands
+import aiohttp
+
+from timezonefinder import TimezoneFinder
+import pytz
+
+import dateparser
+import eCommands
+import db
+
+import utils.stalkMarketPredictions as sm
+
+from utils.uiElements import BoolPage
+
+
+if TYPE_CHECKING:
+    from bot import GGBot
+
+log = logging.getLogger(__name__)
+
+day_segment_names = ["Sunday Buy Price", "N/A", "Monday Morning", "Monday Afternoon", "Tuesday Morning",
+                     "Tuesday Afternoon", "Wednesday Morning", "Wednesday Afternoon", "Thursday Morning",
+                     "Thursday Afternoon", "Friday Morning", "Friday Afternoon", "Saturday Morning", "Saturday Afternoon"]
+
+tzf = TimezoneFinder()
+
+
+class InvalidTimeZoneError(Exception):
+    pass
+
+
+async def set_time_zone(tz_name: str) -> pytz.tzinfo:
+    """
+    Sets the system time zone to the time zone represented by the given string.
+    If `tz_name` is None or an empty string, will default to UTC.
+    If `tz_name` does not represent a valid time zone string, will raise InvalidTimeZoneError.
+    :raises: InvalidTimeZoneError
+    :returns: The `pytz.tzinfo` instance of the newly set time zone.
+    """
+
+    try:
+        tz = pytz.timezone(tz_name or "UTC")
+    except pytz.UnknownTimeZoneError:
+        raise InvalidTimeZoneError(tz_name)
+
+    # await db.update_system_field(conn, tz.zone)
+    return tz
+
+
+async def get_timezone(ctx: commands.Context, city_query: str):
+
+    msg = await ctx.send("\U0001F50D Searching '{}' (may take a while)...".format(city_query))
+
+    # Look up the city on Overpass (OpenStreetMap)
+    async with aiohttp.ClientSession() as sess:
+        # OverpassQL is weird, but this basically searches for every node of type city with name [input].
+        async with sess.get("https://nominatim.openstreetmap.org/search?city=novosibirsk&format=json&limit=1", params={"city": city_query, "format": "json", "limit": "1"}) as r:
+            if r.status != 200:
+                await ctx.send("\N{WARNING SIGN} OSM Nominatim API returned error. Try again.")
+                return None
+
+            data = await r.json()
+
+    # If we didn't find a city, complain
+    if not data:
+        await ctx.send("\N{WARNING SIGN} City '{}' not found.".format(city_query))
+        return None
+
+    # Take the lat/long given by Overpass and put it into timezonefinder
+    lat, lng = (float(data[0]["lat"]), float(data[0]["lon"]))
+    timezone_name = tzf.timezone_at(lng=lng, lat=lat)
+
+    # Also delete the original searching message
+    await msg.delete()
+
+    if not timezone_name:
+        await ctx.send("\N{WARNING SIGN} Time zone for city '{}' not found. This should never happen.".format(data[0]["display_name"]))
+        return None
+
+    # This should hopefully result in a valid time zone name
+    # (if not, something went wrong)
+
+    tz = await set_time_zone(timezone_name)
+    offset = tz.utcoffset(datetime.utcnow())
+    offset_str = "UTC{:+02d}:{:02d}".format(int(offset.total_seconds() // 3600), int(offset.total_seconds() // 60 % 60))
+
+    await ctx.send("Account Time zone set to {} ({}, {}).\n*Data from OpenStreetMap, queried using Nominatim.*".format(tz.tzname(datetime.utcnow()), offset_str, tz.zone))
+
+
+class StalkMarket(commands.Cog):
+
+    def __init__(self, bot: 'GGBot'):
+        self.bot = bot
+
+
+    @commands.is_owner()
+    @eCommands.group(name="register", aliases=["void_channel", "vc"],
+                     brief="Registers an account with Stalk Market",
+                     examples=['']
+                     )
+    async def register(self, ctx: commands.Context):
+        await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
+
+        await ctx.send("You have been registered with Stalk Market Bot!")
+
+
+    @commands.guild_only()
+    @eCommands.group(name="add_price", aliases=["add", "ap"], brief="Add a new price at the current UTC time.",
+                     # description="Sets/unsets/shows the default logging channel.",  # , usage='<command> [channel]'
+                     examples=['39', "42"])
+    async def add_new_price_now(self, ctx: commands.Context, price: int):
+
+        now = datetime.utcnow()
+
+        day_of_week = int(now.strftime("%w"))
+        if now.hour >= 12:  # Past noon.
+            day_segment = day_of_week * 2 + 1
+        else:
+            day_segment = day_of_week * 2
+
+        if day_segment == 1:
+            await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
+            return
+
+        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        confirmation = BoolPage(name="Add New Price", body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+
+        response = await confirmation.run(ctx)
+        if response:
+            new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year, day_segment=day_segment, price=price)
+            await db.add_price(self.bot.db_pool, new_price)
+            await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
+        else:
+            await ctx.send(f"Canceled!")
+
+
+    @commands.guild_only()
+    @eCommands.group(name="bulk_add", aliases=["b_a"], brief="Add a list of prices starting from Monday morning",
+                     description="Add a list of prices starting from Monday morning. For prices you may not have, just type `none`.",  # , usage='<command> [channel]'
+                     examples=['98 65 100 none 183 32'])
+    async def bulk_add_price(self, ctx: commands.Context, *prices):
+        if len(prices) == 0:
+            await ctx.send_help(self.bulk_add_price)
+
+        if len(prices) > 12:
+            await ctx.send("\N{WARNING SIGN} Too many prices entered! There are only 12 different sell prices in the week!")
+            return
+
+        parsed_prices = []
+        for price in prices:
+            try:
+                parsed_price = int(price)
+                parsed_price = parsed_price if parsed_price > 0 else None
+            except ValueError:
+                parsed_price = None
+
+            parsed_prices.append(parsed_price)
+
+        now = datetime.utcnow()
+        day_segment = 2
+
+        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        embed = discord.Embed(title=f"Add New Prices", description="Are you sure you want to add the following prices?")
+
+        for price in parsed_prices:
+            if price is not None:
+                embed.add_field(name=day_segment_names[day_segment], value=f"{price} Bells")
+            day_segment += 1
+
+        confirmation = BoolPage(embed=embed)
+
+        response = await confirmation.run(ctx)
+        if response:
+            day_segment = 2
+            for price in parsed_prices:
+                if price is not None:
+                    new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                                          day_segment=day_segment, price=price)
+                    await db.add_price(self.bot.db_pool, new_price)
+                day_segment += 1
+
+            await ctx.send(f"Prices set!")
+        else:
+            await ctx.send(f"Canceled!")
+
+
+    @commands.is_owner()
+    @eCommands.command(name="remove",
+                       brief="Remove price",
+                       examples=['39 1 day and 6 hours ago est', "42 4/5 11:00am"])
+    async def remove(self, ctx: commands.Context, day_segment: int):
+        now = datetime.utcnow()
+        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        if day_segment != 1 and day_segment < 14:
+            price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                                day_segment=day_segment, price=0)
+            await db.remove_price(self.bot.db_pool, price)
+
+    @eCommands.command(name="add_price_at", aliases=["add_at", "ap_at"],
+                       brief="Add a new price at a specific date & time.",
+                       examples=['39 1 day and 6 hours ago utc+1', "42 4/5 11:00am est"])
+    async def add_new_price_at(self, ctx: commands.Context, price: int, *, date: str):
+
+        now = dateparser.parse(date)
+        if now is None:
+            await ctx.send(f"Error! Unable to determine when {date} is!")
+            return
+
+        day_of_week = int(now.strftime("%w"))
+        if now.hour >= 12:  # Past noon.
+            day_segment = day_of_week * 2 + 1
+        else:
+            day_segment = day_of_week * 2
+
+        if day_segment == 1:
+            await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
+            return
+
+        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        confirmation = BoolPage(name="Add New Price",
+                                body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+
+        response = await confirmation.run(ctx)
+
+        if response:
+            new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                                  day_segment=day_segment, price=price)
+            await db.add_price(self.bot.db_pool, new_price)
+            await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
+        else:
+            await ctx.send(f"Canceled!")
+
+
+    @eCommands.command(name="list", aliases=["list_prices"],
+                       brief="Lists the current weeks recorded prices.",
+                       examples=[""])
+    async def list_prices(self, ctx: commands.Context):
+
+        prices = await self.get_prices(ctx.author.id)
+
+        embed = discord.Embed(title=f"Prices for {ctx.author.display_name}")
+        if len(prices) > 0:
+            for price in prices:
+                embed.add_field(name=day_segment_names[price.day_segment], value=f"{price.price} Bells")
+        else:
+            embed.description = "\N{WARNING SIGN} No prices have been recorded yet!"
+
+        await ctx.send(embed=embed)
+
+    @commands.is_owner()
+    @eCommands.command(name="tpredict", #aliases=["list_prices"],
+                       brief="Predicts the possible outcomes",
+                       examples=[""])
+    async def predict_prices(self, ctx: commands.Context):
+
+        embed = discord.Embed(title=f"Price predictions for {ctx.author.display_name}")
+
+        prices = await self.get_prices(ctx.author.id)
+        # predictions, min_max = sm.get_test_predictions()
+        predictions, min_max = sm.get_predictions(prices)
+
+        desc = f"You have the following possible patterns:"
+
+        if len(predictions) == 0:
+            desc += "\n**None!!!**\n**It is likely that the dataset is incorrect.**"
+
+        for prediction in predictions:
+            # desc.append(prediction.description)
+
+            embed.add_field(name=prediction.description,
+                            value=f"```"
+                                  f"Monday AM:    {prediction.prices[2]}\n"
+                                  f"Monday PM:    {prediction.prices[3]}\n"
+                                  f"Tuesday AM:   {prediction.prices[4]}\n"
+                                  f"Tuesday PM:   {prediction.prices[5]}\n"
+                                  f"Wednesday AM: {prediction.prices[6]}\n"
+                                  f"Wednesday AM: {prediction.prices[7]}\n"
+                                  f"Thursday AM:  {prediction.prices[8]}\n"
+                                  f"Thursday AM:  {prediction.prices[9]}\n"
+                                  f"Friday AM:    {prediction.prices[10]}\n"
+                                  f"Friday AM:    {prediction.prices[11]}\n"
+                                  f"Saturday AM:  {prediction.prices[12]}\n"
+                                  f"Saturday AM:  {prediction.prices[13]}"
+                                  f"```", inline=False)
+
+        embed.description = desc
+
+        await ctx.send(embed=embed)
+
+    @eCommands.command(name="graph", aliases=["predict"],
+                       brief="Predicts the possible outcomes",
+                       examples=[""])
+    async def graph_predict_prices(self, ctx: commands.Context):
+
+        embed = discord.Embed(title=f"Price predictions for {ctx.author.display_name}")
+
+        prices = await self.get_prices(ctx.author.id)
+        # predictions, min_max = sm.get_test_predictions()
+        predictions, min_max = sm.get_predictions(prices)
+
+        desc = f"You have the following possible outcomes:"
+
+        if len(predictions) == 0:
+            desc += "\n**None!!!**\n**It is likely that the dataset is incorrect.**"
+            image = None
+        else:
+            outcomes = []
+            for pred in predictions:
+                outcome = f"\n**Max Price: {pred.weekMax}** {pred.description}"
+                if outcome not in outcomes:
+                    desc += outcome
+                outcomes.append(outcome)
+                # mentioned_pred.append(pred.description)
+
+            image_buffer = sm.matplotgraph_predictions(ctx.author, predictions, min_max)
+            image_buffer.seek(0)
+            image = discord.File(filename="turnipChart.png", fp=image_buffer)
+            embed.set_image(url=f"attachment://turnipChart.png")
+            log.info("Generated Graph")
+
+        if len(desc) > 2000:
+            desc = desc[:1996] + "..."
+
+        embed.description = desc
+
+        await ctx.send(embed=embed, file=image)
+
+
+    async def get_prices(self, user_id: int, date=None) -> List[db.Prices]:
+        if date is None:
+            date = datetime.utcnow()
+
+        week_of_year = int(date.strftime("%U"))  # TODO: account for begining of the year
+        year = date.year
+
+        prices = await db.get_prices(self.bot.db_pool, user_id, 0, year, week_of_year)
+        prices.sort(key=lambda x: x.day_segment)
+
+        return prices
+
+
+    @eCommands.command(name="tg",  # aliases=["list_prices"],
+                       brief="test graPH",
+                       examples=[""])
+    async def TESTGRAPH(self, ctx: commands.Context):
+        import plotly.io as pio
+        pio.orca.config.use_xvfb = True
+        import plotly.graph_objects as go
+        import numpy as np
+        np.random.seed(1)
+
+        N = 100
+        x = np.random.rand(N)
+        y = np.random.rand(N)
+        colors = np.random.rand(N)
+        sz = np.random.rand(N) * 30
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=x,
+            y=y,
+            mode="markers",
+            marker=go.scatter.Marker(
+                size=sz,
+                color=colors,
+                opacity=0.6,
+                colorscale="Viridis"
+            )
+        ))
+
+        # fig.show()
+        # fig.show(renderer="png")
+        fig.write_image("fig1.png")
+
+        # await ctx.send("Done!")
+
+
+def setup(bot):
+    bot.add_cog(StalkMarket(bot))

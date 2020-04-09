@@ -1,0 +1,8 @@
+asyncpg
+discord.py>=1.3.2
+psutil
+dateparser
+pytz
+timezonefinder
+scipy
+matplotlib

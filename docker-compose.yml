@@ -1,0 +1,20 @@
+version: "3"
+services:
+   bot:
+      build: src/
+      entrypoint:
+      - python3
+      - startStalkMarket.py
+      volumes:
+        - "./config.json:/app/config.json"
+      depends_on:
+      - sdb
+      restart: always
+   sdb:
+      image: postgres:11-alpine
+      volumes:
+      - "db_data:/var/lib/postgresql/data"
+      restart: always
+
+volumes:
+   db_data:
