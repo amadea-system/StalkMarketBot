@@ -21,7 +21,7 @@ extensions = (
     # -- Command Extensions -- #
     'cogs.stalkMarket',
     'cogs.helpCmd',
-    # 'cogs.utilities',
+    'cogs.utilities',
 )
 
 
