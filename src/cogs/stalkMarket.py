@@ -247,20 +247,6 @@ class StalkMarket(commands.Cog):
             await ctx.send(f"Canceled!")
 
 
-    @commands.is_owner()
-    @eCommands.command(name="remove",
-                       brief="Remove price",
-                       examples=['39 1 day and 6 hours ago est', "42 4/5 11:00am"])
-    async def remove(self, ctx: commands.Context, day_segment: int):
-        now = datetime.utcnow()
-        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
-
-        if day_segment != 1 and day_segment < 14:
-            price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-                                day_segment=day_segment, price=0)
-            await db.remove_price(self.bot.db_pool, price)
-
 
     @eCommands.command(name="add_price_at", aliases=["add_at", "ap_at"],
                        brief="Add a new price at a specific date & time.",
@@ -302,6 +288,84 @@ class StalkMarket(commands.Cog):
             embed.description = "\N{WARNING SIGN} No prices have been recorded yet!"
 
         await ctx.send(embed=embed)
+
+
+
+    @eCommands.command(name="remove",
+                       brief="Allows you tto remove a recorded price from the current week",
+                       examples=[''])
+    async def remove(self, ctx: commands.Context):
+        est = timezone('US/Eastern')
+        # now = datetime.utcnow()
+        now = est.fromutc(datetime.utcnow())
+
+        day_of_week = int(now.strftime("%w"))
+        if now.hour >= 12:  # Past noon.
+            day_segment = day_of_week * 2 + 1
+        else:
+            day_segment = day_of_week * 2
+
+        if day_segment == 1:
+            day_segment = 0
+            # await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
+            # return
+
+        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        embed = discord.Embed(title="Remove Price",
+                              description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+
+        buttons = [
+            ("✅", "accept"),
+            ("\N{Leftwards Black Arrow}", "left"),
+            ("\N{Black Rightwards Arrow}", "right"),
+        ]
+
+        remove_prompt = StringReactPage(embed=embed, edit_in_place=True, buttons=buttons, allowable_responses=[])
+        while True:
+            response = await remove_prompt.run(ctx)
+
+            if response is None:
+                last_embed = discord.Embed(title="❌ Price Remove Canceled!",
+                                           description=f"No prices were removed!")
+                await remove_prompt.finish(last_embed)
+                return
+
+            elif response.content() == "accept":
+                last_embed = discord.Embed(title="✅ Price Removed",
+                                           description=f"The price of for {day_segment_names[day_segment]} was removed.")
+                await remove_prompt.finish(last_embed)
+
+                remove_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                                         day_segment=day_segment, price=0)
+                await db.remove_price(self.bot.db_pool, remove_price)
+
+                return
+
+            elif response.content() == "left":
+                if day_segment == 0:
+                    pass
+                elif day_segment == 2:
+                    day_segment = 0  # Skip 1
+                else:
+                    day_segment -= 1  # Decrement by 1
+
+                remove_prompt.embed = discord.Embed(title="Remove Price",
+                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+
+            elif response.content() == "right":
+
+                if day_segment == 0:
+                    day_segment = 2  # Skip 1
+                elif day_segment == 13:
+                    pass
+                else:
+                    day_segment += 1  # Increment by 1
+
+                remove_prompt.embed = discord.Embed(title="Remove Price",
+                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+
 
     @commands.is_owner()
     @eCommands.command(name="tpredict", #aliases=["list_prices"],
