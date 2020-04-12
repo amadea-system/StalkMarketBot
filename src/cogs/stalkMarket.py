@@ -105,13 +105,12 @@ class StalkMarket(commands.Cog):
 
 
     @commands.is_owner()
-    @eCommands.group(name="register", aliases=["void_channel", "vc"],
+    @eCommands.group(name="register",
                      brief="Registers an account with Stalk Market",
                      examples=['']
                      )
     async def register(self, ctx: commands.Context):
         await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
-
         await ctx.send("You have been registered with Stalk Market Bot!")
 
 
@@ -141,6 +140,7 @@ class StalkMarket(commands.Cog):
 
 
     async def add_new_price_handler(self, ctx: commands.Context, price: int, year: int, week: int, day_segment: int):
+        await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
 
         embed = discord.Embed(title="Add New Price",
                               description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
@@ -167,6 +167,7 @@ class StalkMarket(commands.Cog):
 
                 new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week,
                                       day_segment=day_segment, price=price)
+
                 await db.add_price(self.bot.db_pool, new_price)
                 return
 
@@ -198,6 +199,8 @@ class StalkMarket(commands.Cog):
                      description="Add a list of prices starting from Monday morning. For prices you may not have, just type `none`.",  # , usage='<command> [channel]'
                      examples=['98 65 100 none 183 32'])
     async def bulk_add_price(self, ctx: commands.Context, *prices):
+        await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
+
         if len(prices) == 0:
             await ctx.send_help(self.bulk_add_price)
 
@@ -249,6 +252,7 @@ class StalkMarket(commands.Cog):
                        brief="Add a new price at a specific date & time.",
                        examples=['39 1 day and 6 hours ago utc+1', "42 4/5 11:00am est"])
     async def add_new_price_at(self, ctx: commands.Context, price: int, *, date: str):
+        await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
 
         now = dateparser.parse(date)
         if now is None:
@@ -445,7 +449,9 @@ class StalkMarket(commands.Cog):
 
     async def get_prices(self, user_id: int, date=None) -> List[db.Prices]:
         if date is None:
-            date = datetime.utcnow()
+            # date = datetime.utcnow()
+            est = timezone('US/Eastern')
+            date = est.fromutc(datetime.utcnow())
 
         week_of_year = int(date.strftime("%U"))  # TODO: account for begining of the year
         year = date.year

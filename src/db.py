@@ -126,7 +126,11 @@ async def does_account_exist(pool, sid: int, user_id: int):
 async def add_account(pool, sid: int, user_id: int, account_id: int, account_name: str):
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO accounts(server_id, user_id, account_id, account_name) VALUES($1, $2, $3, $4)",
+            """
+            INSERT INTO accounts(server_id, user_id, account_id, account_name) VALUES($1, $2, $3, $4)
+            ON CONFLICT (server_id, user_id, account_id)
+            DO NOTHING
+            """,
             sid, user_id, account_id, account_name)
 
 
