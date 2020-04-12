@@ -138,7 +138,10 @@ class StalkMarket(commands.Cog):
 
         week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
         year = now.year
+        await self.add_new_price_handler(ctx, price, year, week_of_year, day_segment)
 
+
+    async def add_new_price_handler(self, ctx: commands.Context, price: int, year: int, week: int, day_segment: int):
 
         embed = discord.Embed(title="Add New Price",
                               description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
@@ -163,7 +166,7 @@ class StalkMarket(commands.Cog):
                                            description=f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
                 await add_prompt.finish(last_embed)
 
-                new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week,
                                       day_segment=day_segment, price=price)
                 await db.add_price(self.bot.db_pool, new_price)
                 return
@@ -190,19 +193,6 @@ class StalkMarket(commands.Cog):
 
                 add_prompt.embed = discord.Embed(title="Add New Price",
                                                  description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
-
-
-        # confirmation = BoolPage(name="Add New Price",
-        #                         body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
-        #
-        # response = await confirmation.run(ctx)
-        # if response:
-        #     new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-        #                           day_segment=day_segment, price=price)
-        #     await db.add_price(self.bot.db_pool, new_price)
-        #     await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
-        # else:
-        #     await ctx.send(f"Canceled!")
 
 
     @commands.guild_only()
@@ -271,6 +261,7 @@ class StalkMarket(commands.Cog):
                                 day_segment=day_segment, price=0)
             await db.remove_price(self.bot.db_pool, price)
 
+
     @eCommands.command(name="add_price_at", aliases=["add_at", "ap_at"],
                        brief="Add a new price at a specific date & time.",
                        examples=['39 1 day and 6 hours ago utc+1', "42 4/5 11:00am est"])
@@ -288,24 +279,12 @@ class StalkMarket(commands.Cog):
             day_segment = day_of_week * 2
 
         if day_segment == 1:
-            await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
-            return
+            day_segment = 0
 
         week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
         year = now.year
 
-        confirmation = BoolPage(name="Add New Price",
-                                body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
-
-        response = await confirmation.run(ctx)
-
-        if response:
-            new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-                                  day_segment=day_segment, price=price)
-            await db.add_price(self.bot.db_pool, new_price)
-            await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
-        else:
-            await ctx.send(f"Canceled!")
+        await self.add_new_price_handler(ctx, price, year, week_of_year, day_segment)
 
 
     @eCommands.command(name="list", aliases=["list_prices"],

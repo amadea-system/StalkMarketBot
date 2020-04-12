@@ -453,11 +453,13 @@ class StringReactPage(Page):
         if _msg.channel.id != self.page_message.channel.id:
             return False
 
+        if _msg.content.lower().strip() not in self.allowable_responses:
+            return False
+
         self.LOG.info(f"returning: true. content: {_msg.content}")
         self.match = _msg.content.lower().strip()
         return True
 
-        # return False
 
     async def check_permissions(self):
         permissions = self.ctx.channel.permissions_for(self.ctx.guild.me)
