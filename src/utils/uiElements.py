@@ -90,7 +90,9 @@ class Page:
         self.page_message: Optional[discord.Message] = None
         self.user_message: Optional[discord.Message] = None
 
-    async def run(self, ctx: commands.Context):
+        self.running = False
+
+    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None):
         pass
 
     def construct_std_page_msg(self) -> str:
@@ -144,7 +146,7 @@ class BoolPage(Page):
 
         super().__init__(page_type="n/a", name=name, body=body, callback=callback, additional=additional, embed=embed, previous_msg=previous_msg, timeout=timeout)
 
-    async def run(self, ctx: commands.Context):
+    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None):
         """
         Callback signature: page: reactMenu.Page, _client: commands.Bot, ctx: commands.Context, response: bool
         """
@@ -206,7 +208,7 @@ class StringPage(Page):
 
         super().__init__(page_type="n/a", **kwrgs)
 
-    async def run(self, ctx: commands.Context):
+    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None):
         """
         Callback signature: page: reactMenu.Page
         """
@@ -299,3 +301,229 @@ class StringPage(Page):
             return True
 
         return False
+
+
+class StringReactPage(Page):
+    # cancel_emoji = '🛑'
+    cancel_emoji = "❌"
+
+    def __init__(self, buttons: List[Tuple[Union[discord.PartialEmoji, str], Any]] = None, allowable_responses: Optional[List[str]] = None, cancel_btn=True, edit_in_place=False, **kwrgs):
+        """
+        Callback signature: ctx: commands.Context, page: reactMenu.Page
+
+        name: Optional[str] = None, body: Optional[str] = None,
+        callback: Callable = do_nothing, additional: str = None, embed: Optional[discord.Embed] = None,
+        previous_msg: Optional[Union[discord.Message, PageResponse]] = None, timeout: int = 120.0
+        """
+        self.ctx = None
+        self.match = None
+        self.cancel_btn = cancel_btn
+        self.allowable_responses = allowable_responses or []
+        self.edit_in_place = edit_in_place
+        self.canceled = False
+        self.buttons = buttons or []
+        self.sent_msg = []
+        self._reaction_match = None
+
+        if self.cancel_btn:
+            self.buttons.append((self.cancel_emoji, None))
+
+        super().__init__(page_type="n/a", **kwrgs)
+
+    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None):
+        """
+        Callback signature: page: reactMenu.Page
+        """
+        self.ctx = ctx
+        channel: discord.TextChannel = ctx.channel
+        author: discord.Member = ctx.author
+        message: discord.Message = ctx.message
+
+        await self.check_permissions()
+        if new_embed is not None:
+            self.embed = new_embed
+
+        self.page_message = await self.send(self.construct_std_page_msg(), embed=self.embed)
+
+        if not self.running or not self._can_remove_reactions:
+            for (reaction, _) in self.buttons:
+                try:
+                    await self.page_message.add_reaction(reaction)
+                except discord.Forbidden:
+                    raise CannotAddReactions()
+
+        self.running = True
+
+        while True:
+
+            done, pending = await asyncio.wait([
+                self.ctx.bot.wait_for('raw_reaction_add', timeout=self.timeout, check=self.react_check),
+                self.ctx.bot.wait_for('message', timeout=self.timeout, check=self.msg_check)
+            ], return_when=asyncio.FIRST_COMPLETED)
+
+            try:
+                stuff = done.pop().result()
+
+            except asyncio.TimeoutError:
+                # await ctx.send("Command timed out.")
+                # await self.remove()
+                await ctx.send("Timed Out!")
+                # await ctx.send("Done!")
+                return None
+
+            except Exception as e:
+                self.LOG.exception(e)
+            # if any of the tasks died for any reason,
+            #  the exception will be replayed here.
+
+            for future in pending:
+                future.cancel()  # we don't need these anymore
+
+            if self.canceled:
+                # await self.remove()
+                # await ctx.send("Done!")
+                return None
+
+            if self.match is not None and len(self.allowable_responses) > 0:
+                # self.LOG.info(f"Got: {self.match}")
+                if self.match not in self.allowable_responses:
+                    content = self.match
+                    if content.startswith(ctx.bot.command_prefix):
+                        self.sent_msg.append(
+                            await self.ctx.send(f"It appears that you used a command while a menu system is still running. Disregarding the input."))
+                    else:
+                        self.sent_msg.append(await self.ctx.send(f"`{content}` is not a valid choice. Please try again."))
+
+                    # Force match and canceled to be None/False to loop around and let the user try again.
+                    self.match = None
+                    self.canceled = False
+
+            if self.match is not None:
+                if callable(self.match):
+                    await self.match(self.ctx, self)
+
+                if not self._can_remove_reactions or not self.edit_in_place:  # If we can't remove the reactions, we'll just fall back to removing the message.
+                    await self.remove()
+
+                else:
+                    await self.reset_reaction()
+
+                return PageResponse(response=self.match, ui_message=self.prev)
+
+
+    async def reset_reaction(self):
+
+        if discord.utils.find(lambda m: len(m) > 0 and m[0] == self._reaction_match, self.buttons):
+            try:
+                await self.page_message.remove_reaction(self._reaction_match, self.ctx.author)
+            except (discord.Forbidden, discord.NotFound, discord.InvalidArgument, discord.HTTPException):
+                pass
+
+            self._reaction_match = None
+
+    def react_check(self, payload):
+        """Uses raw_reaction_add"""
+        if len(self.buttons) == 0:
+            return False
+        if payload.user_id != self.ctx.author.id:
+            return False
+
+        if payload.message_id != self.page_message.id:
+            return False
+
+        if self.cancel_emoji == str(payload.emoji):
+            self.canceled = True
+            return True
+
+        to_check = str(payload.emoji)
+        for (emoji, func) in self.buttons:
+            if to_check == emoji:
+                self.match = func
+                self._reaction_match = emoji
+                return True
+
+        return False
+
+    def msg_check(self, _msg: discord.Message):
+        """Uses on_message"""
+
+        if _msg.author.id != self.ctx.author.id:
+            return False
+
+        if _msg.channel.id != self.page_message.channel.id:
+            return False
+
+        self.LOG.info(f"returning: true. content: {_msg.content}")
+        self.match = _msg.content.lower().strip()
+        return True
+
+        # return False
+
+    async def check_permissions(self):
+        permissions = self.ctx.channel.permissions_for(self.ctx.guild.me)
+        self._verify_permissions(self.ctx, permissions)
+        #
+        # if self.prev is None and not self._can_remove_reactions:
+        #     # Only send this warning message the first time the menu system is activated.
+        #     await self.ctx.send(f"\N{WARNING SIGN}\ufe0f Gabby Gums is missing the `Manage Messages` permission!\n"
+        #                         f"While you can continue without giving Gabby Gums this permission, you will experience a suboptimal menu system experience.")
+
+    def _verify_permissions(self, ctx, permissions):
+        if not permissions.send_messages:
+            raise CannotSendMessages()
+
+        if self.embed is not None and not permissions.embed_links:
+            raise CannotEmbedLinks()
+
+        self._can_remove_reactions = permissions.manage_messages
+
+        if len(self.buttons) > 0:
+            if not permissions.add_reactions:
+                raise CannotAddReactions()
+            if not permissions.read_message_history:
+                raise CannotAddReactions()
+            if not permissions.external_emojis:
+                raise CannotAddExtenalReactions()
+
+
+    async def send(self, content: Optional[str] = None, embed: Optional[discord.Embed] = None) -> discord.Message:
+
+        if self.prev and self._can_remove_reactions:
+            await self.prev.edit(content=content, embed=embed)
+        else:
+            self.prev = await self.ctx.send(content=content, embed=embed)
+            self.sent_msg.append(self.prev)
+        return self.prev
+
+
+    async def remove(self, user: bool = True, page: bool = True):
+
+        # if self.previous is not None:
+        #     await self.previous.remove(user, page)
+
+        try:
+            if user and self.user_message is not None:
+                await self.user_message.delete(delay=1)
+        except Exception:
+            pass
+
+        try:
+            for msg in self.sent_msg:
+                if page and msg is not None:
+                    await msg.delete(delay=1)
+
+        except Exception:
+            pass
+
+
+    async def finish(self, last_embed: Optional[discord.Embed] = None):
+        """Remove all reactions and edit the embed with a given finish embed"""
+
+        if self._can_remove_reactions and self.edit_in_place:
+            try:
+                await self.page_message.clear_reactions()
+            except (discord.Forbidden, discord.NotFound, discord.InvalidArgument, discord.HTTPException):
+                pass
+
+        await self.send(embed=last_embed)
+

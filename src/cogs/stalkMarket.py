@@ -12,6 +12,7 @@ from discord.ext import commands
 import aiohttp
 
 from timezonefinder import TimezoneFinder
+from pytz import timezone
 import pytz
 
 import dateparser
@@ -20,7 +21,7 @@ import db
 
 import utils.stalkMarketPredictions as sm
 
-from utils.uiElements import BoolPage
+from utils.uiElements import BoolPage, StringReactPage
 
 
 if TYPE_CHECKING:
@@ -120,7 +121,9 @@ class StalkMarket(commands.Cog):
                      examples=['39', "42"])
     async def add_new_price_now(self, ctx: commands.Context, price: int):
 
-        now = datetime.utcnow()
+        est = timezone('US/Eastern')
+        # now = datetime.utcnow()
+        now = est.fromutc(datetime.utcnow())
 
         day_of_week = int(now.strftime("%w"))
         if now.hour >= 12:  # Past noon.
@@ -129,21 +132,77 @@ class StalkMarket(commands.Cog):
             day_segment = day_of_week * 2
 
         if day_segment == 1:
-            await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
-            return
+            day_segment = 0
+            # await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
+            # return
 
         week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
         year = now.year
 
-        confirmation = BoolPage(name="Add New Price", body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
 
-        response = await confirmation.run(ctx)
-        if response:
-            new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year, day_segment=day_segment, price=price)
-            await db.add_price(self.bot.db_pool, new_price)
-            await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
-        else:
-            await ctx.send(f"Canceled!")
+        embed = discord.Embed(title="Add New Price",
+                              description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+        buttons = [
+            ("✅", "accept"),
+            ("\N{Leftwards Black Arrow}", "left"),
+            ("\N{Black Rightwards Arrow}", "right"),
+        ]
+
+        add_prompt = StringReactPage(embed=embed, edit_in_place=True, buttons=buttons, allowable_responses=[])
+        while True:
+            response = await add_prompt.run(ctx)
+
+            if response is None:
+                last_embed = discord.Embed(title="❌ Price Set Canceled!",
+                                           description=f"No new prices were added!")
+                await add_prompt.finish(last_embed)
+                return
+
+            elif response.content() == "accept":
+                last_embed = discord.Embed(title="✅ Price Set",
+                                           description=f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
+                await add_prompt.finish(last_embed)
+
+                new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                                      day_segment=day_segment, price=price)
+                await db.add_price(self.bot.db_pool, new_price)
+                return
+
+            elif response.content() == "left":
+                if day_segment == 0:
+                    pass
+                elif day_segment == 2:
+                    day_segment = 0  # Skip 1
+                else:
+                    day_segment -= 1  # Decrement by 1
+
+                add_prompt.embed = discord.Embed(title="Add New Price",
+                                                 description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+
+            elif response.content() == "right":
+
+                if day_segment == 0:
+                    day_segment = 2  # Skip 1
+                elif day_segment == 13:
+                    pass
+                else:
+                    day_segment += 1  # Increment by 1
+
+                add_prompt.embed = discord.Embed(title="Add New Price",
+                                                 description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+
+
+        # confirmation = BoolPage(name="Add New Price",
+        #                         body=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
+        #
+        # response = await confirmation.run(ctx)
+        # if response:
+        #     new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+        #                           day_segment=day_segment, price=price)
+        #     await db.add_price(self.bot.db_pool, new_price)
+        #     await ctx.send(f"Set the price for {day_segment_names[day_segment]} to **{price}** Bells.")
+        # else:
+        #     await ctx.send(f"Canceled!")
 
 
     @commands.guild_only()
