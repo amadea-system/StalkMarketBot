@@ -115,7 +115,6 @@ class StalkMarket(commands.Cog):
         await ctx.send("You have been registered with Stalk Market Bot!")
 
 
-    @commands.guild_only()
     @eCommands.group(name="add_price", aliases=["add", "ap"], brief="Add a new price at the current UTC time.",
                      # description="Sets/unsets/shows the default logging channel.",  # , usage='<command> [channel]'
                      examples=['39', "42"])
@@ -195,7 +194,6 @@ class StalkMarket(commands.Cog):
                                                  description=f"Do you wish to set the price for {day_segment_names[day_segment]} to **{price}** Bells?")
 
 
-    @commands.guild_only()
     @eCommands.group(name="bulk_add", aliases=["b_a"], brief="Add a list of prices starting from Monday morning",
                      description="Add a list of prices starting from Monday morning. For prices you may not have, just type `none`.",  # , usage='<command> [channel]'
                      examples=['98 65 100 none 183 32'])
@@ -247,7 +245,6 @@ class StalkMarket(commands.Cog):
             await ctx.send(f"Canceled!")
 
 
-
     @eCommands.command(name="add_price_at", aliases=["add_at", "ap_at"],
                        brief="Add a new price at a specific date & time.",
                        examples=['39 1 day and 6 hours ago utc+1', "42 4/5 11:00am est"])
@@ -288,7 +285,6 @@ class StalkMarket(commands.Cog):
             embed.description = "\N{WARNING SIGN} No prices have been recorded yet!"
 
         await ctx.send(embed=embed)
-
 
 
     @eCommands.command(name="remove",
@@ -406,6 +402,7 @@ class StalkMarket(commands.Cog):
         embed.description = desc
 
         await ctx.send(embed=embed)
+
 
     @eCommands.command(name="graph", aliases=["predict"],
                        brief="Predicts the possible outcomes",
