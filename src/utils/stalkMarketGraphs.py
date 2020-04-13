@@ -18,6 +18,9 @@ import discord
 
 from utils.stalkMarketPredictions import day_segment_names, Pattern, fix_sell_prices_length, analyze_possibilities
 
+if TYPE_CHECKING:
+    from cogs.stalkMarket import UserPredictions
+
 log = logging.getLogger(__name__)
 
 
@@ -206,51 +209,84 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
     fig.show()
 """
 
+def matplotgraph_guild_predictions(users_predictions: List['UserPredictions']) -> BytesIO:
+    """Graph the predictions"""
+
+    max_graphs = 3
+
+    x_axis = day_segment_names[2:]
+
+    plt.style.use('dark_background')
+
+    fig: plt.Figure
+    ax: plt.Axes
+    fig, ax = plt.subplots()
+
+    for i, pred in enumerate(users_predictions):
+        if i >= max_graphs:
+            break
+
+        best_price_points = [price.actual if price.is_actual_price() else price.max for price in pred.best().prices][2:]
+        ax.plot(*smooth_plot(x_axis, best_price_points), label=f"{pred.user_name} - Best")
+
+        # avg_price_points = pred.average
+        # ax.plot(*smooth_plot(x_axis, avg_price_points), label=f"{pred.user_name} - Average")
+
+    legend = ax.legend(shadow=True, fontsize='medium')
+    plt.xticks(np.arange(12), x_axis, rotation=90)  # Set the x ticks to the day names
+
+    # plt.show()
+
+    imgBuffer = BytesIO()
+
+    plt.savefig(imgBuffer, format="png", dpi=150, bbox_inches='tight')
+    plt.close()
+    return imgBuffer
 
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
 
     # test_graph()
-    buy_price = 90
-    sell_price = [buy_price, buy_price]
-
-    sell_price.append(78)
-    sell_price.append(74)
-
-    sell_price.append(70)
-    sell_price.append(104)
-
-    sell_price.append(167)
-    sell_price.append(518)
+    # buy_price = 90
+    # sell_price = [buy_price, buy_price]
     #
-    sell_price.append(160)
-    sell_price.append(98)
-
-    sell_price = fix_sell_prices_length(sell_price)
-
-    possibilities, min_max_pattern, avg_prices = analyze_possibilities(sell_price)
-
-    for prediction in possibilities:
-        # desc.append(prediction.description)
-
-        log.info(f"\nDesc: {prediction.description}\n\n"
-                 f"Sunday Sell:  {prediction.prices[0]}\n"
-                 f"Monday AM:    {prediction.prices[2]}\n"
-                 f"Monday PM:    {prediction.prices[3]}\n"
-                 f"Tuesday AM:   {prediction.prices[4]}\n"
-                 f"Tuesday PM:   {prediction.prices[5]}\n"
-                 f"Wednesday AM: {prediction.prices[6]}\n"
-                 f"Wednesday AM: {prediction.prices[7]}\n"
-                 f"Thursday AM:  {prediction.prices[8]}\n"
-                 f"Thursday AM:  {prediction.prices[9]}\n"
-                 f"Friday AM:    {prediction.prices[10]}\n"
-                 f"Friday AM:    {prediction.prices[11]}\n"
-                 f"Saturday AM:  {prediction.prices[12]}\n"
-                 f"Saturday AM:  {prediction.prices[13]}"
-                 f"\n")
-
-    # graph_predictions(None, possibilities, min_max_pattern)
-    # matplotgraph_predictions(None, possibilities, min_max_pattern, testing=True)
-
-    print("Done")
+    # sell_price.append(78)
+    # sell_price.append(74)
+    #
+    # sell_price.append(70)
+    # sell_price.append(104)
+    #
+    # sell_price.append(167)
+    # sell_price.append(518)
+    # #
+    # sell_price.append(160)
+    # sell_price.append(98)
+    #
+    # sell_price = fix_sell_prices_length(sell_price)
+    #
+    # possibilities, min_max_pattern, avg_prices = analyze_possibilities(sell_price)
+    #
+    # for prediction in possibilities:
+    #     # desc.append(prediction.description)
+    #
+    #     log.info(f"\nDesc: {prediction.description}\n\n"
+    #              f"Sunday Sell:  {prediction.prices[0]}\n"
+    #              f"Monday AM:    {prediction.prices[2]}\n"
+    #              f"Monday PM:    {prediction.prices[3]}\n"
+    #              f"Tuesday AM:   {prediction.prices[4]}\n"
+    #              f"Tuesday PM:   {prediction.prices[5]}\n"
+    #              f"Wednesday AM: {prediction.prices[6]}\n"
+    #              f"Wednesday AM: {prediction.prices[7]}\n"
+    #              f"Thursday AM:  {prediction.prices[8]}\n"
+    #              f"Thursday AM:  {prediction.prices[9]}\n"
+    #              f"Friday AM:    {prediction.prices[10]}\n"
+    #              f"Friday AM:    {prediction.prices[11]}\n"
+    #              f"Saturday AM:  {prediction.prices[12]}\n"
+    #              f"Saturday AM:  {prediction.prices[13]}"
+    #              f"\n")
+    #
+    # # graph_predictions(None, possibilities, min_max_pattern)
+    # # matplotgraph_predictions(None, possibilities, min_max_pattern, testing=True)
+    #
+    # print("Done")

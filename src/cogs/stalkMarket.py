@@ -7,6 +7,7 @@ import logging
 
 from datetime import datetime
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Type, Any
 
 import discord
@@ -22,7 +23,7 @@ import eCommands
 import db
 
 import utils.stalkMarketPredictions as sm
-from utils.stalkMarketGraphs import matplotgraph_predictions
+from utils.stalkMarketGraphs import matplotgraph_predictions, matplotgraph_guild_predictions
 
 from utils.uiElements import BoolPage, StringReactPage
 
@@ -50,6 +51,21 @@ tzf = TimezoneFinder()
 
 class InvalidTimeZoneError(Exception):
     pass
+
+
+@dataclass
+class UserPredictions:
+    user_id: int
+    user_name: str
+    patterns: List[sm.Pattern]
+    min_max: sm.Pattern
+    average: List[float]
+
+    def best(self) -> Optional[sm.Pattern]:
+        return self.patterns[0] if len(self.patterns) > 0 else None
+
+    def best_type(self):
+        pass
 
 
 async def set_time_zone(tz_name: str) -> pytz.tzinfo:
@@ -533,7 +549,7 @@ class StalkMarket(commands.Cog):
                        brief="Predict who on the server will have the highest prices for the week.",
                        examples=[""])
     async def guild_predict(self, ctx: commands.Context):
-
+        guild: discord.Guild = ctx.guild
         users = await db.get_all_accounts_for_guild(self.bot.db_pool, ctx.guild.id)
 
         user_predictions = []
@@ -541,11 +557,12 @@ class StalkMarket(commands.Cog):
             prices = await self.get_prices(user.user_id)
 
             predictions, min_max, average_prices = sm.get_predictions(prices)
-            user_predictions.append((user.user_id, predictions, min_max, average_prices))
+            d_member: discord.Member = guild.get_member(user.user_id)
+            user_name = d_member.display_name if d_member is not None else "Unknown"
+            user_predictions.append(UserPredictions(user.user_id, user_name, predictions, min_max, average_prices))
 
-
-        def sort_func(possibility):
-            return max(possibility[3])
+        def sort_func(_predictions: UserPredictions):
+            return max(_predictions.average)
 
         user_predictions.sort(reverse=True, key=sort_func)
 
@@ -553,12 +570,19 @@ class StalkMarket(commands.Cog):
 
         for pred in user_predictions:
             embed.add_field(name=" ‌‌‌",
-                            value=f"<@{pred[0]}>\n"
-                                  f"Max Average Price: {max(pred[3])}\n"
-                                  f"Max Possible Price: {pred[2].weekMax}\n",
+                            value=f"<@{pred.user_id}>\n"
+                                  f"Max Average Price: {max(pred.average)}\n"
+                                  f"Max Possible Price: {pred.min_max.weekMax}\n",
                             inline=False)
 
-        await ctx.send(embed=embed)
+        image_buffer = matplotgraph_guild_predictions(user_predictions)
+        image = None
+        if image_buffer is not None:
+            image_buffer.seek(0)
+            image = discord.File(filename="turnipGuildChart.png", fp=image_buffer)
+            embed.set_image(url=f"attachment://turnipGuildChart.png")
+
+        await ctx.send(embed=embed, file=image)
 
 
     @commands.is_owner()
