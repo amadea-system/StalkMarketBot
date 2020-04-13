@@ -558,14 +558,16 @@ def generate_possibilities(sell_prices: List) -> List[Pattern]:
     return possibile_patterns
 
 
-def analyze_possibilities(sell_prices: List) -> Tuple[List[Pattern], Optional[Pattern]]:
+def analyze_possibilities(sell_prices: List) -> Tuple[List[Pattern], Optional[Pattern], Optional[List[float]]]:
     generated_possibilities = generate_possibilities(sell_prices)
 
     if len(generated_possibilities) == 0:
-        return [], None
+        return [], None, None
 
     global_min_max = []
+    average_prices = []
     for day in range(0, 14):
+        average_price = []
         if day > 1:
             prices = MinMaxPrice(_min=999, _max=0, actual=generated_possibilities[0].prices[day].actual)
 
@@ -575,10 +577,17 @@ def analyze_possibilities(sell_prices: List) -> Tuple[List[Pattern], Optional[Pa
 
                 if poss.prices[day].max > prices.max:
                     prices.max = poss.prices[day].max
+
+                if generated_possibilities[0].prices[day].actual is not None:
+                    average_price.append(generated_possibilities[0].prices[day].actual)
+                else:
+                    average_price.append((poss.prices[day].min + poss.prices[day].max)/2)
         else:
             prices = MinMaxPrice(_min=generated_possibilities[0].prices[day].min, _max=generated_possibilities[0].prices[day].min, actual=generated_possibilities[0].prices[day].min)
 
         global_min_max.append(prices)
+        if len(average_price) > 0:
+            average_prices.append(sum(average_price)/len(average_price))
 
     min_max_pattern = Pattern(description="predicted min/max across all patterns",
                               number=4,
@@ -601,7 +610,7 @@ def analyze_possibilities(sell_prices: List) -> Tuple[List[Pattern], Optional[Pa
 
     generated_possibilities.sort(reverse=True, key=sort_func)
 
-    return generated_possibilities, min_max_pattern
+    return generated_possibilities, min_max_pattern, average_prices
 
 
 def fix_sell_prices_length(sell_prices: List[int]):
@@ -626,7 +635,7 @@ def get_test_predictions() -> Tuple[List[Pattern], Optional[Pattern]]:
     return analyze_possibilities(sell_price)
 
 
-def get_predictions(prices: List[Prices]) -> Tuple[List[Pattern], Optional[Pattern]]:
+def get_predictions(prices: List[Prices]) -> Tuple[List[Pattern], Optional[Pattern], Optional[List[float]]]:
     """From a list of buy price and sell prices, predict all possible outcomes from the stalk market."""
     input_prices = []
     for i in range(0, 14):
@@ -959,7 +968,7 @@ def smooth_plot(x_data: List[Any], y_data: List[float]):
 # splprep
 
 
-def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], min_max_pattern: Pattern, testing=False) -> BytesIO:
+def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], min_max_pattern: Pattern, average_prices: List[float], testing=False) -> BytesIO:
     """Graph the predictions"""
 
     x_axis = day_segment_names[2:]
@@ -975,11 +984,12 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 
     actual_price_points = [price.actual if price.is_actual_price() else None for price in min_max_pattern.prices][2:]
 
-    for pred in predictions:
-        for i, price in enumerate(pred.prices[2:]):
-            avg_points[i] += price.min + price.max
+    # for pred in predictions:
+    #     for i, price in enumerate(pred.prices[2:]):
+    #         avg_points[i] += price.min + price.max
 
-    avg_points = [i/(len(predictions)*2) for i in avg_points]
+    # avg_points = [i/(len(predictions)*2) for i in avg_points]
+    avg_points = average_prices
 
     title = f"{user.display_name}'s Stalk Market Predictions" if user is not None else f"Stalk Market Predictions"
 

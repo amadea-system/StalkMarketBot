@@ -104,14 +104,15 @@ class StalkMarket(commands.Cog):
         self.bot = bot
 
 
-    @commands.is_owner()
+    @commands.guild_only()
     @eCommands.group(name="register",
-                     brief="Registers an account with Stalk Market",
+                     brief="Associates your account with the current guild",
                      examples=['']
                      )
     async def register(self, ctx: commands.Context):
         await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
-        await ctx.send("You have been registered with Stalk Market Bot!")
+        await ctx.send(f"Your account has been associated with {ctx.guild.name}."
+                       f" Group based commands such as `s;predict` will now work with your account.")
 
 
     @eCommands.group(name="add_price", aliases=["add", "ap"], brief="Add a new price at the current Eastern/US time.",
@@ -377,7 +378,7 @@ class StalkMarket(commands.Cog):
 
         prices = await self.get_prices(ctx.author.id)
         # predictions, min_max = sm.get_test_predictions()
-        predictions, min_max = sm.get_predictions(prices)
+        predictions, min_max, average_prices = sm.get_predictions(prices)
 
         desc = f"You have the following possible patterns:"
 
@@ -408,16 +409,21 @@ class StalkMarket(commands.Cog):
         await ctx.send(embed=embed)
 
 
-    @eCommands.command(name="graph", aliases=["predict"],
-                       brief="Predicts the possible outcomes",
-                       examples=[""])
-    async def graph_predict_prices(self, ctx: commands.Context):
+    @eCommands.command(name="graph",#, aliases=["predict"],
+                       brief="Graphs the possible outcomes for the week",
+                       description="Graphs the possible outcomes for the week. You can also graph another users "
+                                   "possible outcomes by including thier discord mention or User ID with the command.",
+                       examples=["", "@Hibiki", "389590123654012632"])
+    async def graph_predict_prices(self, ctx: commands.Context, user: Optional[discord.Member] = None):
 
-        embed = discord.Embed(title=f"Price predictions for {ctx.author.display_name}")
+        if user is None:
+            user = ctx.author
 
-        prices = await self.get_prices(ctx.author.id)
+        embed = discord.Embed(title=f"Price predictions for {user.display_name}")
+
+        prices = await self.get_prices(user.id)
         # predictions, min_max = sm.get_test_predictions()
-        predictions, min_max = sm.get_predictions(prices)
+        predictions, min_max, average_prices = sm.get_predictions(prices)
 
         desc = f"You have the following possible outcomes:"
 
@@ -433,7 +439,7 @@ class StalkMarket(commands.Cog):
                 outcomes.append(outcome)
                 # mentioned_pred.append(pred.description)
 
-            image_buffer = sm.matplotgraph_predictions(ctx.author, predictions, min_max)
+            image_buffer = sm.matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
             image_buffer.seek(0)
             image = discord.File(filename="turnipChart.png", fp=image_buffer)
             embed.set_image(url=f"attachment://turnipChart.png")
@@ -462,21 +468,38 @@ class StalkMarket(commands.Cog):
         return prices
 
 
-    @commands.is_owner()
-    @eCommands.command(name="test",  # aliases=["list_prices"],
-                       brief="",
+    @commands.guild_only()
+    @eCommands.command(name="predict",  # aliases=["list_prices"],
+                       brief="Predict who on the server will have the highest prices for the week.",
                        examples=[""])
-    async def test_cmd(self, ctx: commands.Context):
+    async def guild_predict(self, ctx: commands.Context):
 
         users = await db.get_all_accounts_for_guild(self.bot.db_pool, ctx.guild.id)
 
+        user_predictions = []
         for user in users:
-            await ctx.send(f"userID: {user.user_id}")
             prices = await self.get_prices(user.user_id)
-            txt = ""
-            for price in prices:
-                txt += f"{price.price}, "
-            await ctx.send(txt)
+
+            predictions, min_max, average_prices = sm.get_predictions(prices)
+            user_predictions.append((user.user_id, predictions, min_max, average_prices))
+
+
+        def sort_func(possibility):
+            return max(possibility[3])
+
+        user_predictions.sort(reverse=True, key=sort_func)
+
+        embed = discord.Embed(title="Users With The Highest Average Prices")
+
+        for pred in user_predictions:
+            embed.add_field(name=" ‌‌‌",
+                            value=f"<@{pred[0]}>\n"
+                                  f"Max Average Price: {max(pred[3])}\n"
+                                  f"Max Possible Price: {pred[2].weekMax}\n",
+                            inline=False)
+
+        await ctx.send(embed=embed)
+
 
     @commands.is_owner()
     @eCommands.command(name="tg",  # aliases=["list_prices"],
