@@ -4,8 +4,10 @@ Part of Stalk Market Bot.
 """
 
 import logging
-from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Type, Any
+
 from datetime import datetime
+from collections import defaultdict
+from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Type, Any
 
 import discord
 from discord.ext import commands
@@ -32,6 +34,15 @@ log = logging.getLogger(__name__)
 day_segment_names = ["Sunday Buy Price", "N/A", "Monday Morning", "Monday Afternoon", "Tuesday Morning",
                      "Tuesday Afternoon", "Wednesday Morning", "Wednesday Afternoon", "Thursday Morning",
                      "Thursday Afternoon", "Friday Morning", "Friday Afternoon", "Saturday Morning", "Saturday Afternoon"]
+
+
+# http://jkorpela.fi/chars/spaces.html
+pattern_space_table = (
+    "\N{HAIR SPACE}",  # 0 Roller Coaster
+    "\N{SIX-PER-EM SPACE}\N{HAIR SPACE}",  # 1  Huge Spike
+    "",  # 2  Always Decreasing
+    "\N{SIX-PER-EM SPACE}",  # 3  Small Spike
+)
 
 tzf = TimezoneFinder()
 
@@ -409,6 +420,33 @@ class StalkMarket(commands.Cog):
         await ctx.send(embed=embed)
 
 
+    def get_spaces_for_pattern(self, pattern_num: int, patterns_seen):
+
+        if 2 in patterns_seen:  # Always dec
+            em_quads = (
+                "\N{EM QUAD}\N{EM QUAD}",
+                "\N{EM QUAD}\N{EM QUAD}\N{EM QUAD}",
+                "",
+                "\N{EM QUAD}\N{EM QUAD}\N{EM QUAD}",
+            )
+        elif 0 in patterns_seen:  # Roller Coast
+            em_quads = (
+                "",
+                "\N{EM QUAD}",
+                "",
+                "\N{EM QUAD}",
+            )
+        else:  # Huge and Small spike
+            em_quads = (
+                "",
+                "",
+                "",
+                "",
+            )
+
+        spaces = f"\N{EM QUAD}{em_quads[pattern_num]}{pattern_space_table[pattern_num]}"
+        return spaces
+
     @eCommands.command(name="graph",#, aliases=["predict"],
                        brief="Graphs the possible outcomes for the week",
                        description="Graphs the possible outcomes for the week. You can also graph another users "
@@ -425,19 +463,39 @@ class StalkMarket(commands.Cog):
         # predictions, min_max = sm.get_test_predictions()
         predictions, min_max, average_prices = sm.get_predictions(prices)
 
-        desc = f"You have the following possible outcomes:"
+        desc = f"You have the following possible outcomes:\n"
 
         if len(predictions) == 0:
-            desc += "\n**None!!!**\n**It is likely that the dataset is incorrect.**"
+            desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
             image = None
         else:
-            outcomes = []
+
+            outcomes = defaultdict(list)
+            outcome_txt = []
+            patterns_seen = set()
             for pred in predictions:
-                outcome = f"\n**Max Price: {pred.weekMax}** {pred.description}"
-                if outcome not in outcomes:
-                    desc += outcome
-                outcomes.append(outcome)
-                # mentioned_pred.append(pred.description)
+                outcomes[pred.number].append(pred.weekMax)
+                patterns_seen.add(pred.number)
+
+            max_length = 0
+            for pattern_num, prices in outcomes.items():
+                pattern_desc = sm.pattern_descriptions[pattern_num]
+                pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
+
+                if len(prices) == 1:
+                    price_txt = f"Max Price:  {prices[0]}"
+                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
+
+                else:
+                    price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
+                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
+
+                max_length = len(price_txt) if len(price_txt) > max_length else max_length
+                outcome_txt.append((price_txt, pattern_txt))
+
+            for price_txt, pattern_txt in outcome_txt:
+
+                desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
 
             image_buffer = sm.matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
             image_buffer.seek(0)
@@ -445,6 +503,7 @@ class StalkMarket(commands.Cog):
             embed.set_image(url=f"attachment://turnipChart.png")
             log.info("Generated Graph")
 
+        # Make sure we don't exceed the max char limit of the description field.
         if len(desc) > 2000:
             desc = desc[:1996] + "..."
 
