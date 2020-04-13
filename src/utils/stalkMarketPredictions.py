@@ -30,6 +30,14 @@ log = logging.getLogger(__name__)
 day_segment_names = ["Sunday Buy Price", "N/A", "Mon AM", "Mon PM", "Tue AM", "Tue PM", "Wed AM", "Wed PM",
                      "Thu AM", "Thu PM", "Fri AM", "Fri PM", "Sat AM", "Sat PM"]
 
+pattern_descriptions = (
+    "Roller Coaster",
+    "Huge Spike",
+    "Always Decreasing",
+    "Small Spike",
+    "predicted min/max across all patterns",
+)
+
 
 class InconsistentPhaseLengths(Exception):
     pass
@@ -185,7 +193,7 @@ def generate_pattern_0_with_lengths(given_prices: List[int], high_phase_1_len, d
 
         predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
 
-    return Pattern(description="Roller Coaster",#"high, decreasing, high, decreasing, high",
+    return Pattern(description=pattern_descriptions[0], #"Roller Coaster",#"high, decreasing, high, decreasing, high",
                    number=0,
                    prices=predicted_prices)
 
@@ -368,7 +376,7 @@ def generate_pattern_1_with_peak(given_prices: List[int], peak_start: int) -> Op
 
         predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
 
-    return Pattern(description="Huge Spike",#"decreasing, high spike, random lows",
+    return Pattern(description=pattern_descriptions[1], # "Huge Spike",#"decreasing, high spike, random lows",
                    number=1,
                    prices=predicted_prices)
 
@@ -412,7 +420,7 @@ def generate_pattern_2(given_prices: List[int]) -> List[Pattern]:
         min_rate -= 500
         max_rate -= 300
 
-    pattern = Pattern(description="Always Decreasing",
+    pattern = Pattern(description=pattern_descriptions[2], #"Always Decreasing",
                       number=2,
                       prices=predicted_prices)
     return [pattern]
@@ -527,7 +535,7 @@ def generate_pattern_3_with_peak(given_prices: List[int], peak_start: int) -> Op
             min_rate -= 500
             max_rate -= 300
 
-    return Pattern(description="Small Spike",#"decreasing, spike, decreasing",
+    return Pattern(description=pattern_descriptions[3], #"Small Spike",#"decreasing, spike, decreasing",
                    number=3,
                    prices=predicted_prices)
 
