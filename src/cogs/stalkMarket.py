@@ -371,7 +371,7 @@ class StalkMarket(commands.Cog):
     @commands.is_owner()
     @eCommands.command(name="tpredict", #aliases=["list_prices"],
                        brief="Predicts the possible outcomes",
-                       examples=[""])
+                       examples=[""], hidden=True)
     async def predict_prices(self, ctx: commands.Context):
 
         embed = discord.Embed(title=f"Price predictions for {ctx.author.display_name}")
@@ -504,7 +504,7 @@ class StalkMarket(commands.Cog):
     @commands.is_owner()
     @eCommands.command(name="tg",  # aliases=["list_prices"],
                        brief="test graPH",
-                       examples=[""])
+                       examples=[""], hidden=True)
     async def TESTGRAPH(self, ctx: commands.Context):
         import plotly.io as pio
         pio.orca.config.use_xvfb = True
