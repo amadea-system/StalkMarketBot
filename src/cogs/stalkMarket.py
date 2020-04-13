@@ -489,7 +489,7 @@ class StalkMarket(commands.Cog):
 
         user_predictions.sort(reverse=True, key=sort_func)
 
-        embed = discord.Embed(title="Users With The Highest Average Prices")
+        embed = discord.Embed(title="Users With The Highest Potential Prices")
 
         for pred in user_predictions:
             embed.add_field(name=" ‌‌‌",
