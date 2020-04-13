@@ -22,6 +22,7 @@ import eCommands
 import db
 
 import utils.stalkMarketPredictions as sm
+from utils.stalkMarketGraphs import matplotgraph_predictions
 
 from utils.uiElements import BoolPage, StringReactPage
 
@@ -497,7 +498,7 @@ class StalkMarket(commands.Cog):
 
                 desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
 
-            image_buffer = sm.matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
+            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
             image_buffer.seek(0)
             image = discord.File(filename="turnipChart.png", fp=image_buffer)
             embed.set_image(url=f"attachment://turnipChart.png")
