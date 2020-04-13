@@ -67,6 +67,17 @@ class UserPredictions:
     def best_type(self):
         pass
 
+    def prediction_count(self) -> Optional[Tuple[int, int, int, int]]:
+        if len(self.patterns) == 0:
+            return None
+        count = (
+            len(list(filter(lambda x: x.number == 0, self.patterns))),
+            len(list(filter(lambda x: x.number == 1, self.patterns))),
+            len(list(filter(lambda x: x.number == 2, self.patterns))),
+            len(list(filter(lambda x: x.number == 3, self.patterns))),
+        )
+        return count
+
 
 async def set_time_zone(tz_name: str) -> pytz.tzinfo:
     """
@@ -306,11 +317,14 @@ class StalkMarket(commands.Cog):
     @eCommands.command(name="list", aliases=["list_prices"],
                        brief="Lists the current weeks recorded prices.",
                        examples=[""])
-    async def list_prices(self, ctx: commands.Context):
+    async def list_prices(self, ctx: commands.Context, user: Optional[discord.Member] = None):
 
-        prices = await self.get_prices(ctx.author.id)
+        if user is None:
+            user = ctx.author
 
-        embed = discord.Embed(title=f"Prices for {ctx.author.display_name}")
+        prices = await self.get_prices(user.id)
+
+        embed = discord.Embed(title=f"Prices for {user.display_name}")
         if len(prices) > 0:
             for price in prices:
                 embed.add_field(name=day_segment_names[price.day_segment], value=f"{price.price} Bells")
@@ -477,48 +491,51 @@ class StalkMarket(commands.Cog):
         embed = discord.Embed(title=f"Price predictions for {user.display_name}")
 
         prices = await self.get_prices(user.id)
-        # predictions, min_max = sm.get_test_predictions()
-        predictions, min_max, average_prices = sm.get_predictions(prices)
-
-        desc = f"You have the following possible outcomes:\n"
-
-        if len(predictions) == 0:
-            desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
+        if len(prices) == 0:
+            desc = "\N{WARNING SIGN} Can not make a prediction as no prices have been recorded yet!"
             image = None
         else:
+            predictions, min_max, average_prices = sm.get_predictions(prices)
 
-            outcomes = defaultdict(list)
-            outcome_txt = []
-            patterns_seen = set()
-            for pred in predictions:
-                outcomes[pred.number].append(pred.weekMax)
-                patterns_seen.add(pred.number)
+            desc = f"You have the following possible outcomes:\n"
 
-            max_length = 0
-            for pattern_num, prices in outcomes.items():
-                pattern_desc = sm.pattern_descriptions[pattern_num]
-                pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
+            if len(predictions) == 0:
+                desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
+                image = None
+            else:
 
-                if len(prices) == 1:
-                    price_txt = f"Max Price:  {prices[0]}"
-                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
+                outcomes = defaultdict(list)
+                outcome_txt = []
+                patterns_seen = set()
+                for pred in predictions:
+                    outcomes[pred.number].append(pred.weekMax)
+                    patterns_seen.add(pred.number)
 
-                else:
-                    price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
-                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
+                max_length = 0
+                for pattern_num, prices in outcomes.items():
+                    pattern_desc = sm.pattern_descriptions[pattern_num]
+                    pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
 
-                max_length = len(price_txt) if len(price_txt) > max_length else max_length
-                outcome_txt.append((price_txt, pattern_txt))
+                    if len(prices) == 1:
+                        price_txt = f"Max Price:  {prices[0]}"
+                        pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
 
-            for price_txt, pattern_txt in outcome_txt:
+                    else:
+                        price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
+                        pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
 
-                desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
+                    max_length = len(price_txt) if len(price_txt) > max_length else max_length
+                    outcome_txt.append((price_txt, pattern_txt))
 
-            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
-            image_buffer.seek(0)
-            image = discord.File(filename="turnipChart.png", fp=image_buffer)
-            embed.set_image(url=f"attachment://turnipChart.png")
-            log.info("Generated Graph")
+                for price_txt, pattern_txt in outcome_txt:
+
+                    desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
+
+                image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
+                image_buffer.seek(0)
+                image = discord.File(filename="turnipChart.png", fp=image_buffer)
+                embed.set_image(url=f"attachment://turnipChart.png")
+                log.info("Generated Graph")
 
         # Make sure we don't exceed the max char limit of the description field.
         if len(desc) > 2000:
@@ -555,11 +572,11 @@ class StalkMarket(commands.Cog):
         user_predictions = []
         for user in users:
             prices = await self.get_prices(user.user_id)
-
-            predictions, min_max, average_prices = sm.get_predictions(prices)
-            d_member: discord.Member = guild.get_member(user.user_id)
-            user_name = d_member.display_name if d_member is not None else "Unknown"
-            user_predictions.append(UserPredictions(user.user_id, user_name, predictions, min_max, average_prices))
+            if len(prices) > 0:
+                predictions, min_max, average_prices = sm.get_predictions(prices)
+                d_member: discord.Member = guild.get_member(user.user_id)
+                user_name = d_member.display_name if d_member is not None else "Unknown"
+                user_predictions.append(UserPredictions(user.user_id, user_name, predictions, min_max, average_prices))
 
         def sort_func(_predictions: UserPredictions):
             return max(_predictions.average)
@@ -568,19 +585,26 @@ class StalkMarket(commands.Cog):
 
         embed = discord.Embed(title="Users With The Highest Potential Prices")
 
-        for pred in user_predictions:
-            embed.add_field(name=" ‌‌‌",
-                            value=f"<@{pred.user_id}>\n"
-                                  f"Max Average Price: {max(pred.average)}\n"
-                                  f"Max Possible Price: {pred.min_max.weekMax}\n",
-                            inline=False)
+        if len(user_predictions) > 0:
 
-        image_buffer = matplotgraph_guild_predictions(user_predictions)
-        image = None
-        if image_buffer is not None:
-            image_buffer.seek(0)
-            image = discord.File(filename="turnipGuildChart.png", fp=image_buffer)
-            embed.set_image(url=f"attachment://turnipGuildChart.png")
+            for pred in user_predictions:
+                pattern_count = pred.prediction_count()
+                embed.add_field(name=" ‌‌‌",
+                                value=f"<@{pred.user_id}>\n"
+                                      f"Max Average Price: **{max(pred.average)}**\n"
+                                      f"Max Possible Price: **{pred.min_max.weekMax}**\n"
+                                      f"Best Pattern: **{pred.best().description}** ({pattern_count[pred.best().number]}/{sum(pattern_count)} predictions)",
+                                inline=False)
+
+            image_buffer = matplotgraph_guild_predictions(user_predictions)
+            image = None
+            if image_buffer is not None:
+                image_buffer.seek(0)
+                image = discord.File(filename="turnipGuildChart.png", fp=image_buffer)
+                embed.set_image(url=f"attachment://turnipGuildChart.png")
+        else:
+            embed.description = "\N{WARNING SIGN} No predictions can currenttly be made!"
+            image = None
 
         await ctx.send(embed=embed, file=image)
 
