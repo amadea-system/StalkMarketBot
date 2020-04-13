@@ -114,7 +114,7 @@ class StalkMarket(commands.Cog):
         await ctx.send("You have been registered with Stalk Market Bot!")
 
 
-    @eCommands.group(name="add_price", aliases=["add", "ap"], brief="Add a new price at the current UTC time.",
+    @eCommands.group(name="add_price", aliases=["add", "ap"], brief="Add a new price at the current Eastern/US time.",
                      # description="Sets/unsets/shows the default logging channel.",  # , usage='<command> [channel]'
                      examples=['39', "42"])
     async def add_new_price_now(self, ctx: commands.Context, price: int):
@@ -462,6 +462,23 @@ class StalkMarket(commands.Cog):
         return prices
 
 
+    @commands.is_owner()
+    @eCommands.command(name="test",  # aliases=["list_prices"],
+                       brief="",
+                       examples=[""])
+    async def test_cmd(self, ctx: commands.Context):
+
+        users = await db.get_all_accounts_for_guild(self.bot.db_pool, ctx.guild.id)
+
+        for user in users:
+            await ctx.send(f"userID: {user.user_id}")
+            prices = await self.get_prices(user.user_id)
+            txt = ""
+            for price in prices:
+                txt += f"{price.price}, "
+            await ctx.send(txt)
+
+    @commands.is_owner()
     @eCommands.command(name="tg",  # aliases=["list_prices"],
                        brief="test graPH",
                        examples=[""])
@@ -496,6 +513,9 @@ class StalkMarket(commands.Cog):
         fig.write_image("fig1.png")
 
         # await ctx.send("Done!")
+
+
+
 
 
 def setup(bot):
