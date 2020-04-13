@@ -1025,7 +1025,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 
     if testing:
         plt.show()
-        return
+        return None
 
     imgBuffer = BytesIO()
 
@@ -1119,7 +1119,7 @@ if __name__ == '__main__':
 
     sell_price = fix_sell_prices_length(sell_price)
 
-    possibilities, min_max_pattern = analyze_possibilities(sell_price)
+    possibilities, min_max_pattern, avg_prices= analyze_possibilities(sell_price)
 
     for prediction in possibilities:
         # desc.append(prediction.description)
