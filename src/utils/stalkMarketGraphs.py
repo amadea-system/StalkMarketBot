@@ -143,7 +143,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 
     imgBuffer = BytesIO()
 
-    plt.savefig(imgBuffer, format="png")
+    plt.savefig(imgBuffer, format="png", dpi=150, bbox_inches='tight')
     plt.close()
     return imgBuffer
 
