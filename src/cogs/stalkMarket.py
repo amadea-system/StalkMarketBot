@@ -46,6 +46,22 @@ pattern_space_table = (
     "\N{SIX-PER-EM SPACE}",  # 3  Small Spike
 )
 
+
+number_emotes = [
+    "\N{DIGIT ZERO}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT ONE}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT TWO}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT THREE}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT FOUR}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT FIVE}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT SIX}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT SEVEN}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT EIGHT}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{DIGIT NINE}\N{VARIATION SELECTOR-16}\N{COMBINING ENCLOSING KEYCAP}",
+    "\N{KEYCAP TEN}",
+]
+
+
 tzf = TimezoneFinder()
 
 
@@ -483,59 +499,71 @@ class StalkMarket(commands.Cog):
                        description="Graphs the possible outcomes for the week. You can also graph another users "
                                    "possible outcomes by including thier discord mention or User ID with the command.",
                        examples=["", "@Hibiki", "389590123654012632"])
-    async def graph_predict_prices(self, ctx: commands.Context, user: Optional[discord.Member] = None):
+    async def graph_predict_prices_cmd(self, ctx: commands.Context, user: Optional[discord.Member] = None):
 
         if user is None:
             user = ctx.author
 
-        embed = discord.Embed(title=f"Price predictions for {user.display_name}")
-
         prices = await self.get_prices(user.id)
         if len(prices) == 0:
-            desc = "\N{WARNING SIGN} Can not make a prediction as no prices have been recorded yet!"
-            image = None
+            embed = discord.Embed(title=f"Price predictions for {user.display_name}",
+                                  description="\N{WARNING SIGN} Can not make a prediction as no prices have been recorded yet!")
+            await ctx.send(embed=embed)
+            return
         else:
             predictions, min_max, average_prices = sm.get_predictions(prices)
+            user_prediction = UserPredictions(user.id, user.display_name, predictions, min_max, average_prices)
 
-            desc = f"You have the following possible outcomes:\n"
+            await self.graph_predict_prices(ctx, user, user_prediction)
 
-            if len(predictions) == 0:
-                desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
-                image = None
-            else:
 
-                outcomes = defaultdict(list)
-                outcome_txt = []
-                patterns_seen = set()
-                for pred in predictions:
-                    outcomes[pred.number].append(pred.weekMax)
-                    patterns_seen.add(pred.number)
+    async def graph_predict_prices(self, ctx: commands.Context, user: discord.Member, user_prediction: UserPredictions) -> discord.Message:
 
-                max_length = 0
-                for pattern_num, prices in outcomes.items():
-                    pattern_desc = sm.pattern_descriptions[pattern_num]
-                    pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
+        embed = discord.Embed(title=f"Price predictions for {user.display_name}")
 
-                    if len(prices) == 1:
-                        price_txt = f"Max Price:  {prices[0]}"
-                        pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
+        predictions = user_prediction.patterns
+        min_max = user_prediction.min_max
+        average_prices = user_prediction.average
 
-                    else:
-                        price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
-                        pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
+        desc = f"You have the following possible outcomes:\n"
 
-                    max_length = len(price_txt) if len(price_txt) > max_length else max_length
-                    outcome_txt.append((price_txt, pattern_txt))
+        if len(predictions) == 0:
+            desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
+            image = None
+        else:
 
-                for price_txt, pattern_txt in outcome_txt:
+            outcomes = defaultdict(list)
+            outcome_txt = []
+            patterns_seen = set()
+            for pred in predictions:
+                outcomes[pred.number].append(pred.weekMax)
+                patterns_seen.add(pred.number)
 
-                    desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
+            max_length = 0
+            for pattern_num, prices in outcomes.items():
+                pattern_desc = sm.pattern_descriptions[pattern_num]
+                pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
 
-                image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
-                image_buffer.seek(0)
-                image = discord.File(filename="turnipChart.png", fp=image_buffer)
-                embed.set_image(url=f"attachment://turnipChart.png")
-                log.info("Generated Graph")
+                if len(prices) == 1:
+                    price_txt = f"Max Price:  {prices[0]}"
+                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
+
+                else:
+                    price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
+                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
+
+                max_length = len(price_txt) if len(price_txt) > max_length else max_length
+                outcome_txt.append((price_txt, pattern_txt))
+
+            for price_txt, pattern_txt in outcome_txt:
+
+                desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
+
+            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
+            image_buffer.seek(0)
+            image = discord.File(filename="turnipChart.png", fp=image_buffer)
+            embed.set_image(url=f"attachment://turnipChart.png")
+            log.info("Generated Graph")
 
         # Make sure we don't exceed the max char limit of the description field.
         if len(desc) > 2000:
@@ -543,12 +571,12 @@ class StalkMarket(commands.Cog):
 
         embed.description = desc
 
-        await ctx.send(embed=embed, file=image)
+        msg = await ctx.send(embed=embed, file=image)
+        return msg
 
 
     async def get_prices(self, user_id: int, date=None) -> List[db.Prices]:
         if date is None:
-            # date = datetime.utcnow()
             est = timezone('US/Eastern')
             date = est.fromutc(datetime.utcnow())
 
@@ -587,10 +615,10 @@ class StalkMarket(commands.Cog):
 
         if len(user_predictions) > 0:
 
-            for pred in user_predictions[:sm.max_guild_predictions]:
+            for i, pred in enumerate(user_predictions[:sm.max_guild_predictions]):
                 pattern_count = pred.prediction_count()
                 embed.add_field(name=" ‌‌‌",
-                                value=f"<@{pred.user_id}>\n"
+                                value=f"{number_emotes[i+1]} <@{pred.user_id}>\n"
                                       f"Max Average Price: **{max(pred.average)}**\n"
                                       f"Max Possible Price: **{pred.min_max.weekMax}**\n"
                                       f"Best Pattern: **{pred.best().description}** ({pattern_count[pred.best().number]}/{sum(pattern_count)} predictions)",
@@ -606,7 +634,47 @@ class StalkMarket(commands.Cog):
             embed.description = "\N{WARNING SIGN} No predictions can currenttly be made!"
             image = None
 
-        await ctx.send(embed=embed, file=image)
+        buttons = [
+            (number_emotes[1], "one"),
+            (number_emotes[2], "two"),
+            (number_emotes[3], "three"),
+        ]
+
+        buttons = buttons[:len(user_predictions)]  # Make sure we don't have more buttons than predictions
+        predict_ui = StringReactPage(embed=embed, image=image, edit_in_place=False, remove_msgs=False, buttons=buttons,
+                                     allowable_responses=[], cancel_btn=False)
+
+        specific_prediction_msg = None
+        first_run = True
+        while True:
+            response = await predict_ui.run(ctx, send_new_msg=first_run)
+            first_run = False
+
+            if response is None:
+
+                await predict_ui.finish()
+                return
+
+            elif response.content() == "one":
+                user_pred = user_predictions[0]
+                d_member: discord.Member = guild.get_member(user_pred.user_id)
+                if specific_prediction_msg is not None:
+                    await specific_prediction_msg.delete(delay=1)
+                specific_prediction_msg = await self.graph_predict_prices(ctx, d_member, user_pred)
+
+            elif response.content() == "two":
+                user_pred = user_predictions[1]
+                d_member: discord.Member = guild.get_member(user_pred.user_id)
+                if specific_prediction_msg is not None:
+                    await specific_prediction_msg.delete(delay=1)
+                specific_prediction_msg = await self.graph_predict_prices(ctx, d_member, user_pred)
+
+            elif response.content() == "three":
+                user_pred = user_predictions[2]
+                d_member: discord.Member = guild.get_member(user_pred.user_id)
+                if specific_prediction_msg is not None:
+                    await specific_prediction_msg.delete(delay=1)
+                specific_prediction_msg = await self.graph_predict_prices(ctx, d_member, user_pred)
 
 
     @commands.is_owner()

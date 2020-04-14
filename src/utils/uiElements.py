@@ -74,12 +74,13 @@ class Page:
     LOG = logging.getLogger("GGBot.Page")
 
     def __init__(self, page_type: str, name: Optional[str] = None, body: Optional[str] = None,
-                 callback: Callable = do_nothing, additional: str = None, embed: Optional[discord.Embed] = None, previous_msg: Optional[Union[discord.Message, PageResponse]] = None, timeout: int = 120.0):
+                 callback: Callable = do_nothing, additional: str = None, embed: Optional[discord.Embed] = None, image = None, previous_msg: Optional[Union[discord.Message, PageResponse]] = None, timeout: int = 120.0):
 
         self.name = name
         self.body = body
         self.additional = additional
         self.embed = embed
+        self.image = image
         self.timeout = timeout
 
         self.page_type = page_type.lower()
@@ -309,7 +310,7 @@ class StringReactPage(Page):
     # cancel_emoji = '🛑'
     cancel_emoji = "❌"
 
-    def __init__(self, buttons: List[Tuple[Union[discord.PartialEmoji, str], Any]] = None, allowable_responses: Optional[List[str]] = None, cancel_btn=True, edit_in_place=False, **kwrgs):
+    def __init__(self, buttons: List[Tuple[Union[discord.PartialEmoji, str], Any]] = None, allowable_responses: Optional[List[str]] = None, cancel_btn=True, edit_in_place=False, remove_msgs=True, **kwrgs):
         """
         Callback signature: ctx: commands.Context, page: reactMenu.Page
 
@@ -326,13 +327,14 @@ class StringReactPage(Page):
         self.buttons = buttons or []
         self.sent_msg = []
         self._reaction_match = None
+        self.remove_msgs = remove_msgs
 
         if self.cancel_btn:
             self.buttons.append((self.cancel_emoji, None))
 
         super().__init__(page_type="n/a", **kwrgs)
 
-    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None):
+    async def run(self, ctx: commands.Context, new_embed: Optional[discord.Embed] = None, send_new_msg=True):
         """
         Callback signature: page: reactMenu.Page
         """
@@ -341,18 +343,19 @@ class StringReactPage(Page):
         author: discord.Member = ctx.author
         message: discord.Message = ctx.message
 
-        await self.check_permissions()
-        if new_embed is not None:
-            self.embed = new_embed
+        if send_new_msg:
+            await self.check_permissions()
+            if new_embed is not None:
+                self.embed = new_embed
 
-        self.page_message = await self.send(self.construct_std_page_msg(), embed=self.embed)
+            self.page_message = await self.send(self.construct_std_page_msg(), embed=self.embed, image=self.image)
 
-        if not self.running or not self.edit_in_place:
-            for (reaction, _) in self.buttons:
-                try:
-                    await self.page_message.add_reaction(reaction)
-                except discord.Forbidden:
-                    raise CannotAddReactions()
+            if not self.running or not self.edit_in_place:
+                for (reaction, _) in self.buttons:
+                    try:
+                        await self.page_message.add_reaction(reaction)
+                    except discord.Forbidden:
+                        raise CannotAddReactions()
 
         self.running = True
 
@@ -369,7 +372,8 @@ class StringReactPage(Page):
             except asyncio.TimeoutError:
                 # await ctx.send("Command timed out.")
                 # await self.remove()
-                await ctx.send("Timed Out!")
+                if self.embed is None:
+                    await ctx.send("Timed Out!")
                 # await ctx.send("Done!")
                 return None
 
@@ -404,7 +408,8 @@ class StringReactPage(Page):
                 if callable(self.match):
                     await self.match(self.ctx, self)
 
-                if not self.edit_in_place:  # If we can't remove the reactions, we'll just fall back to removing the message.
+                # (self.edit_in_place or not self.remove_msgs)
+                if not self.edit_in_place and self.remove_msgs:
                     await self.remove()
                 else:
                     await self.reset_user_react()
@@ -500,12 +505,12 @@ class StringReactPage(Page):
                 raise CannotAddExtenalReactions()
 
 
-    async def send(self, content: Optional[str] = None, embed: Optional[discord.Embed] = None) -> discord.Message:
+    async def send(self, content: Optional[str] = None, embed: Optional[discord.Embed] = None, image: Optional[discord.File] = None) -> discord.Message:
 
         if self.prev and self.edit_in_place:
-            await self.prev.edit(content=content, embed=embed)
+            await self.prev.edit(content=content, embed=embed, file=image)
         else:
-            self.prev = await self.ctx.send(content=content, embed=embed)
+            self.prev = await self.ctx.send(content=content, embed=embed, file=image)
             self.sent_msg.append(self.prev)
         return self.prev
 
@@ -514,33 +519,35 @@ class StringReactPage(Page):
 
         # if self.previous is not None:
         #     await self.previous.remove(user, page)
+        if self.remove_msgs:
 
-        try:
-            if user and self.user_message is not None:
-                await self.user_message.delete(delay=1)
-        except Exception:
-            pass
+            try:
+                if user and self.user_message is not None:
+                    await self.user_message.delete(delay=1)
+            except Exception:
+                pass
 
-        try:
-            for msg in self.sent_msg:
-                if page and msg is not None:
-                    await msg.delete(delay=1)
+            try:
+                for msg in self.sent_msg:
+                    if page and msg is not None:
+                        await msg.delete(delay=1)
 
-        except Exception:
-            pass
+            except Exception:
+                pass
 
 
     async def finish(self, last_embed: Optional[discord.Embed] = None):
         """Remove all reactions and edit the embed with a given finish embed"""
 
-        await self.send(embed=last_embed)
+        if last_embed is not None:
+            await self.send(embed=last_embed, image=self.image)
 
-        if self._can_remove_reactions and self.edit_in_place:
+        if self._can_remove_reactions and (self.edit_in_place or not self.remove_msgs):
             try:
                 await self.page_message.clear_reactions()
             except (discord.Forbidden, discord.NotFound, discord.InvalidArgument, discord.HTTPException):
                 pass
-        elif self.edit_in_place:
+        elif self.edit_in_place or not self.remove_msgs:
             # If we don't have permissions to remove ALL reactions, just remove the reactions we made.
             for react, _ in self.buttons:
                 await self.remove_bot_react(react)
