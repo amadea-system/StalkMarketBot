@@ -135,7 +135,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
     legend = ax.legend(shadow=True, fontsize='x-large')
 
     plt.xticks(np.arange(12), x_axis, rotation=90)  # Set the x ticks to the day names
-    # plt.show()
+    plt.gcf().subplots_adjust(bottom=0.15)  # Make room for the x axis labels
 
     if testing:
         plt.show()
@@ -143,7 +143,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 
     imgBuffer = BytesIO()
 
-    plt.savefig(imgBuffer, format="png", dpi=150, bbox_inches='tight')
+    plt.savefig(imgBuffer, format="png", dpi=150) #, bbox_inches='tight')
     plt.close()
     return imgBuffer
 
@@ -234,12 +234,11 @@ def matplotgraph_guild_predictions(users_predictions: List['UserPredictions']) -
 
     legend = ax.legend(shadow=True, fontsize='medium')
     plt.xticks(np.arange(12), x_axis, rotation=90)  # Set the x ticks to the day names
-
-    # plt.show()
+    plt.gcf().subplots_adjust(bottom=0.15)  # Make room for the x axis labels
 
     imgBuffer = BytesIO()
 
-    plt.savefig(imgBuffer, format="png", dpi=150, bbox_inches='tight')
+    plt.savefig(imgBuffer, format="png", dpi=150) #, bbox_inches='tight')
     plt.close()
     return imgBuffer
 
