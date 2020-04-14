@@ -631,8 +631,10 @@ class StalkMarket(commands.Cog):
                 image = discord.File(filename="turnipGuildChart.png", fp=image_buffer)
                 embed.set_image(url=f"attachment://turnipGuildChart.png")
         else:
-            embed.description = "\N{WARNING SIGN} No predictions can currenttly be made!"
-            image = None
+            # If we can't make a prediction, say so and bail
+            embed.description = "\N{WARNING SIGN} No predictions can currently be made!"
+            await ctx.send(embed=embed)
+            return
 
         buttons = [
             (number_emotes[1], "one"),
