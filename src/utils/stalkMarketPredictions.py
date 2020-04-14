@@ -6,8 +6,6 @@ Part of Stalk Market Bot.
 import math
 import logging
 
-from io import BytesIO
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Any
 
 import discord
@@ -15,12 +13,6 @@ from discord.utils import get
 
 # import plotly.graph_objects as go
 # from plotly.colors import DEFAULT_PLOTLY_COLORS
-
-# import matplotlib.pyplot as plt
-# from scipy.interpolate import make_interp_spline, BSpline
-# from scipy.ndimage.filters import gaussian_filter1d
-# from scipy.interpolate import splrep, splev, splprep
-# import numpy as np
 
 from db import Prices
 
