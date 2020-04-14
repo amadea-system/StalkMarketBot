@@ -26,6 +26,7 @@ from db import Prices
 
 log = logging.getLogger(__name__)
 
+max_guild_predictions = 3
 
 day_segment_names = ["Sunday Buy Price", "N/A", "Mon AM", "Mon PM", "Tue AM", "Tue PM", "Wed AM", "Wed PM",
                      "Thu AM", "Thu PM", "Fri AM", "Fri PM", "Sat AM", "Sat PM"]

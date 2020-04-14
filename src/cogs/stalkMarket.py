@@ -587,7 +587,7 @@ class StalkMarket(commands.Cog):
 
         if len(user_predictions) > 0:
 
-            for pred in user_predictions:
+            for pred in user_predictions[:sm.max_guild_predictions]:
                 pattern_count = pred.prediction_count()
                 embed.add_field(name=" ‌‌‌",
                                 value=f"<@{pred.user_id}>\n"

@@ -16,7 +16,7 @@ import numpy as np
 
 import discord
 
-from utils.stalkMarketPredictions import day_segment_names, Pattern, fix_sell_prices_length, analyze_possibilities
+from utils.stalkMarketPredictions import day_segment_names, Pattern, fix_sell_prices_length, analyze_possibilities, max_guild_predictions
 
 if TYPE_CHECKING:
     from cogs.stalkMarket import UserPredictions
@@ -212,7 +212,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 def matplotgraph_guild_predictions(users_predictions: List['UserPredictions']) -> BytesIO:
     """Graph the predictions"""
 
-    max_graphs = 3
+    max_graphs = max_guild_predictions
 
     x_axis = day_segment_names[2:]
 
