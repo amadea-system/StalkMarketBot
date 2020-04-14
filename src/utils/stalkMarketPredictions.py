@@ -550,7 +550,7 @@ def generate_possibilities(sell_prices: List) -> List[Pattern]:
         possibile_patterns.extend(generate_pattern_2(sell_prices))
         possibile_patterns.extend(generate_pattern_3(sell_prices))
     else:
-        for buy_price in range(90, 110):
+        for buy_price in range(90, 111):
             sell_prices[0] = sell_prices[1] = buy_price
             possibile_patterns.extend(generate_pattern_0(sell_prices))
             possibile_patterns.extend(generate_pattern_1(sell_prices))
