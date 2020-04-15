@@ -9,9 +9,7 @@ from io import BytesIO
 from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Any
 
 import matplotlib.pyplot as plt
-from scipy.interpolate import make_interp_spline, BSpline
-# from scipy.ndimage.filters import gaussian_filter1d
-# from scipy.interpolate import splrep, splev, splprep
+from scipy.interpolate import Akima1DInterpolator, pchip_interpolate
 import numpy as np
 
 import discord
@@ -25,62 +23,15 @@ log = logging.getLogger(__name__)
 
 
 def smooth_plot(x_data: List[Any], y_data: List[float]):
-    points: int = 30
+    # return old_smooth_plot(x_data, y_data)
+    x = np.arange(len(y_data))
 
-    # xnew = np.linspace(0, len(x_data), points)
-    numeric_x = [i for i in range(len(x_data))]
+    xnew = np.linspace(x[0], x[-1], 300)
+    # ynew = Akima1DInterpolator(x, y_data)(xnew)
+    ynew = pchip_interpolate(x, y_data, xnew)
 
+    return xnew, ynew
 
-    # spl = make_interp_spline(numeric_x, y_data, k=3)  # type: BSpline
-    # power_smooth = spl(xnew)
-    # # return xnew, power_smooth
-    #
-    # from scipy.interpolate import make_lsq_spline, BSpline
-    # t = [-1, 0, 1]
-    # k = 3
-    # t = np.r_[(numeric_x[0],) * (k + 1),
-    #           t,
-    #           (numeric_x[-1],) * (k + 1)]
-    # spl = make_lsq_spline(numeric_x, y_data, t, k)
-    # power_smooth = spl(xnew)
-    # return xnew, power_smooth
-
-    import scipy as sp
-
-    x = np.array(numeric_x)
-    y = np.array(y_data)
-    # noinspection PyArgumentList
-    new_x = np.linspace(x.min(), x.max(), points)
-    new_y = sp.interpolate.interp1d(x, y, kind='linear')(new_x)
-
-    # noinspection PyArgumentList
-    newer_x = np.linspace(new_x.min(), new_x.max(), points*10)
-
-    newer_y = sp.interpolate.interp1d(new_x, new_y, kind='quadratic')(newer_x)
-    # new_y = sp.interpolate.interp1d(x, y, kind='quadratic')(new_x)
-
-    return newer_x, newer_y
-
-    #
-    # numeric_x = [i for i in range(len(x_data))]
-    # bspl = splrep(xnew, y_data, s=5)
-    # # bspl = splprep(numeric_x, y_data, s=5)
-    # bspl_y = splev(numeric_x, bspl)
-    # return xnew, bspl_y
-
-    # from scipy.interpolate import interp1d
-    # # x = np.linspace(0, 10, num=11, endpoint=True)
-    # # y = np.cos(-x ** 2 / 9.0)
-    # # f = interp1d(x, y)
-    # f2 = interp1d(xnew, y_data, kind='cubic')
-    # return xnew, f2(xnew)
-    #
-    # from scipy import signal
-    # sy = signal.savgol_filter(y_data, 5, 3)
-    # return xnew, sy
-
-
-# splprep
 
 def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], min_max_pattern: Pattern, average_prices: List[float], testing=False) -> BytesIO:
     """Graph the predictions"""
@@ -209,6 +160,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
     fig.show()
 """
 
+
 def matplotgraph_guild_predictions(users_predictions: List['UserPredictions']) -> BytesIO:
     """Graph the predictions"""
 
@@ -247,45 +199,45 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
 
     # test_graph()
-    # buy_price = 90
-    # sell_price = [buy_price, buy_price]
+    buy_price = 90
+    sell_price = [buy_price, buy_price]
+
+    sell_price.append(78)
+    sell_price.append(74)
+
+    sell_price.append(70)
+    sell_price.append(104)
+
+    sell_price.append(167)
+    sell_price.append(518)
     #
-    # sell_price.append(78)
-    # sell_price.append(74)
-    #
-    # sell_price.append(70)
-    # sell_price.append(104)
-    #
-    # sell_price.append(167)
-    # sell_price.append(518)
-    # #
-    # sell_price.append(160)
-    # sell_price.append(98)
-    #
-    # sell_price = fix_sell_prices_length(sell_price)
-    #
-    # possibilities, min_max_pattern, avg_prices = analyze_possibilities(sell_price)
-    #
-    # for prediction in possibilities:
-    #     # desc.append(prediction.description)
-    #
-    #     log.info(f"\nDesc: {prediction.description}\n\n"
-    #              f"Sunday Sell:  {prediction.prices[0]}\n"
-    #              f"Monday AM:    {prediction.prices[2]}\n"
-    #              f"Monday PM:    {prediction.prices[3]}\n"
-    #              f"Tuesday AM:   {prediction.prices[4]}\n"
-    #              f"Tuesday PM:   {prediction.prices[5]}\n"
-    #              f"Wednesday AM: {prediction.prices[6]}\n"
-    #              f"Wednesday AM: {prediction.prices[7]}\n"
-    #              f"Thursday AM:  {prediction.prices[8]}\n"
-    #              f"Thursday AM:  {prediction.prices[9]}\n"
-    #              f"Friday AM:    {prediction.prices[10]}\n"
-    #              f"Friday AM:    {prediction.prices[11]}\n"
-    #              f"Saturday AM:  {prediction.prices[12]}\n"
-    #              f"Saturday AM:  {prediction.prices[13]}"
-    #              f"\n")
-    #
-    # # graph_predictions(None, possibilities, min_max_pattern)
-    # # matplotgraph_predictions(None, possibilities, min_max_pattern, testing=True)
-    #
-    # print("Done")
+    sell_price.append(160)
+    sell_price.append(98)
+
+    sell_price = fix_sell_prices_length(sell_price)
+
+    possibilities, min_max_pattern, avg_prices = analyze_possibilities(sell_price)
+    print(avg_prices)
+
+    for prediction in possibilities:
+        # desc.append(prediction.description)
+
+        log.info(f"\nDesc: {prediction.description}\n\n"
+                 f"Sunday Sell:  {prediction.prices[0]}\n"
+                 f"Monday AM:    {prediction.prices[2]}\n"
+                 f"Monday PM:    {prediction.prices[3]}\n"
+                 f"Tuesday AM:   {prediction.prices[4]}\n"
+                 f"Tuesday PM:   {prediction.prices[5]}\n"
+                 f"Wednesday AM: {prediction.prices[6]}\n"
+                 f"Wednesday AM: {prediction.prices[7]}\n"
+                 f"Thursday AM:  {prediction.prices[8]}\n"
+                 f"Thursday AM:  {prediction.prices[9]}\n"
+                 f"Friday AM:    {prediction.prices[10]}\n"
+                 f"Friday AM:    {prediction.prices[11]}\n"
+                 f"Saturday AM:  {prediction.prices[12]}\n"
+                 f"Saturday AM:  {prediction.prices[13]}"
+                 f"\n")
+
+    matplotgraph_predictions(None, possibilities, min_max_pattern, avg_prices, testing=True)
+
+    print("Done")
