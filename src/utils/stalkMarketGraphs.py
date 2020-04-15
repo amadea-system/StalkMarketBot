@@ -33,6 +33,27 @@ def smooth_plot(x_data: List[Any], y_data: List[float]):
     return xnew, ynew
 
 
+def format_plot(ax: plt.Axes):
+    """Apply formatting to a plot"""
+    # Add the legend
+    legend = ax.legend(shadow=True, fontsize='medium')
+
+    ax.grid(linewidth="0.5", color="#283442")  # Add gridlines.  #283442
+    ax.set_axisbelow(True)  # Make sure the gridlines are behind the graphs
+
+    # Remove the border
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.spines['bottom'].set_visible(False)
+    ax.spines['left'].set_visible(False)
+
+    ax.tick_params(color="#000000")
+    # Make room for the x axis labels
+    plt.gcf().subplots_adjust(bottom=0.15)#, right=0.1)
+
+    plt.tight_layout()
+
+
 def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], min_max_pattern: Pattern, average_prices: List[float], testing=False) -> BytesIO:
     """Graph the predictions"""
 
@@ -40,7 +61,7 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
     abs_min_points = [price.min for price in min_max_pattern.prices][2:]
     abs_max_points = [price.max for price in min_max_pattern.prices][2:]
 
-    avg_points = [0 for i in abs_max_points]
+    # avg_points = [0 for i in abs_max_points]
 
     if min_max_pattern.prices[0].min is not None:
         buy_price_points = [min_max_pattern.prices[0].min for i in abs_max_points]
@@ -59,7 +80,6 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
     title = f"{user.display_name}'s Stalk Market Predictions" if user is not None else f"Stalk Market Predictions"
 
     # Set up the plots
-
     plt.style.use('dark_background')
 
     fig: plt.Figure
@@ -83,13 +103,15 @@ def matplotgraph_predictions(user: discord.Member, predictions: List[Pattern], m
 
     ax.plot(x_axis, actual_price_points, 'o', color="#C5FFFF", label="Actual Price")#color="#BD9467")
 
-    legend = ax.legend(shadow=True, fontsize='x-large')
+    plt.xticks(np.arange(12), x_axis, rotation=-50)  # Set the x ticks to the day names
 
-    plt.xticks(np.arange(12), x_axis, rotation=90)  # Set the x ticks to the day names
-    plt.gcf().subplots_adjust(bottom=0.15)  # Make room for the x axis labels
+    format_plot(ax)
+
 
     if testing:
-        plt.show()
+        # plt.show()
+        plt.savefig("test_plot.png", format="png", dpi=150)  # , bbox_inches='tight')
+        plt.close()
         return None
 
     imgBuffer = BytesIO()
@@ -184,9 +206,8 @@ def matplotgraph_guild_predictions(users_predictions: List['UserPredictions']) -
         # avg_price_points = pred.average
         # ax.plot(*smooth_plot(x_axis, avg_price_points), label=f"{pred.user_name} - Average")
 
-    legend = ax.legend(shadow=True, fontsize='medium')
-    plt.xticks(np.arange(12), x_axis, rotation=90)  # Set the x ticks to the day names
-    plt.gcf().subplots_adjust(bottom=0.15)  # Make room for the x axis labels
+    plt.xticks(np.arange(12), x_axis, rotation=-50)  # Set the x ticks to the day names
+    format_plot(ax)
 
     imgBuffer = BytesIO()
 
