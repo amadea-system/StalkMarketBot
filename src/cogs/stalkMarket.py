@@ -7,8 +7,7 @@ import logging
 
 from datetime import datetime
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Dict, List, Union, Tuple, NamedTuple, Type, Any
+from typing import TYPE_CHECKING, Optional
 
 import discord
 from discord.ext import commands
@@ -25,6 +24,8 @@ import db
 import utils.stalkMarketPredictions as sm
 from utils.stalkMarketGraphs import matplotgraph_predictions, matplotgraph_guild_predictions
 
+
+from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, UserPredictions
 from utils.uiElements import BoolPage, StringReactPage
 
 
@@ -67,32 +68,6 @@ tzf = TimezoneFinder()
 
 class InvalidTimeZoneError(Exception):
     pass
-
-
-@dataclass
-class UserPredictions:
-    user_id: int
-    user_name: str
-    patterns: List[sm.Pattern]
-    min_max: sm.Pattern
-    average: List[float]
-
-    def best(self) -> Optional[sm.Pattern]:
-        return self.patterns[0] if len(self.patterns) > 0 else None
-
-    def best_type(self):
-        pass
-
-    def prediction_count(self) -> Optional[Tuple[int, int, int, int]]:
-        if len(self.patterns) == 0:
-            return None
-        count = (
-            len(list(filter(lambda x: x.number == 0, self.patterns))),
-            len(list(filter(lambda x: x.number == 1, self.patterns))),
-            len(list(filter(lambda x: x.number == 2, self.patterns))),
-            len(list(filter(lambda x: x.number == 3, self.patterns))),
-        )
-        return count
 
 
 async def set_time_zone(tz_name: str) -> pytz.tzinfo:
@@ -338,7 +313,7 @@ class StalkMarket(commands.Cog):
         if user is None:
             user = ctx.author
 
-        prices = await self.get_prices(user.id)
+        prices = await get_prices_for_user(self.bot.db_pool, user.id)
 
         embed = discord.Embed(title=f"Prices for {user.display_name}")
         if len(prices) > 0:
@@ -434,7 +409,7 @@ class StalkMarket(commands.Cog):
 
         embed = discord.Embed(title=f"Price predictions for {ctx.author.display_name}")
 
-        prices = await self.get_prices(ctx.author.id)
+        prices = await get_prices_for_user(self.bot.db_pool, ctx.author.id)
         # predictions, min_max = sm.get_test_predictions()
         predictions, min_max, average_prices = sm.get_predictions(prices)
 
@@ -504,7 +479,7 @@ class StalkMarket(commands.Cog):
         if user is None:
             user = ctx.author
 
-        prices = await self.get_prices(user.id)
+        prices = await get_prices_for_user(self.bot.db_pool, user.id)
         if len(prices) == 0:
             embed = discord.Embed(title=f"Price predictions for {user.display_name}",
                                   description="\N{WARNING SIGN} Can not make a prediction as no prices have been recorded yet!")
@@ -575,19 +550,6 @@ class StalkMarket(commands.Cog):
         return msg
 
 
-    async def get_prices(self, user_id: int, date=None) -> List[db.Prices]:
-        if date is None:
-            est = timezone('US/Eastern')
-            date = est.fromutc(datetime.utcnow())
-
-        week_of_year = int(date.strftime("%U"))  # TODO: account for begining of the year
-        year = date.year
-
-        prices = await db.get_prices(self.bot.db_pool, user_id, 0, year, week_of_year)
-        prices.sort(key=lambda x: x.day_segment)
-
-        return prices
-
 
     @commands.guild_only()
     @eCommands.command(name="predict",  # aliases=["list_prices"],
@@ -595,23 +557,9 @@ class StalkMarket(commands.Cog):
                        examples=[""])
     async def guild_predict(self, ctx: commands.Context):
         guild: discord.Guild = ctx.guild
-        users = await db.get_all_accounts_for_guild(self.bot.db_pool, ctx.guild.id)
-
-        user_predictions = []
-        for user in users:
-            prices = await self.get_prices(user.user_id)
-            if len(prices) > 0:
-                predictions, min_max, average_prices = sm.get_predictions(prices)
-                d_member: discord.Member = guild.get_member(user.user_id)
-                user_name = d_member.display_name if d_member is not None else "Unknown"
-                user_predictions.append(UserPredictions(user.user_id, user_name, predictions, min_max, average_prices))
-
-        def sort_func(_predictions: UserPredictions):
-            return max(_predictions.average)
-
-        user_predictions.sort(reverse=True, key=sort_func)
-
         embed = discord.Embed(title="Users With The Highest Potential Prices")
+
+        user_predictions = await get_guild_user_predictions(self.bot.db_pool, guild=guild)
 
         if len(user_predictions) > 0:
 

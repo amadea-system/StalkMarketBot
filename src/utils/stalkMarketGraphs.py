@@ -17,7 +17,7 @@ import discord
 from utils.stalkMarketPredictions import day_segment_names, Pattern, fix_sell_prices_length, analyze_possibilities, max_guild_predictions
 
 if TYPE_CHECKING:
-    from cogs.stalkMarket import UserPredictions
+    from utils.stalkMarketHelpers import UserPredictions
 
 log = logging.getLogger(__name__)
 
@@ -220,19 +220,27 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
 
     # test_graph()
-    buy_price = 90
+    # buy_price = 90
+    # sell_price = [buy_price, buy_price]
+    #
+    # sell_price.append(78)
+    # sell_price.append(74)
+    #
+    # sell_price.append(70)
+    # sell_price.append(104)
+    #
+    # sell_price.append(167)
+    # sell_price.append(518)
+    # #
+    # sell_price.append(160)
+    # sell_price.append(98)
+
+    buy_price = 93
     sell_price = [buy_price, buy_price]
 
-    sell_price.append(78)
-    sell_price.append(74)
+    sell_price.append(100)
+    sell_price.append(100)
 
-    sell_price.append(70)
-    sell_price.append(104)
-
-    sell_price.append(167)
-    sell_price.append(518)
-    #
-    sell_price.append(160)
     sell_price.append(98)
 
     sell_price = fix_sell_prices_length(sell_price)
