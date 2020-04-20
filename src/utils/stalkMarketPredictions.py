@@ -24,11 +24,11 @@ day_segment_names = ["Sunday Buy Price", "N/A", "Mon AM", "Mon PM", "Tue AM", "T
                      "Thu AM", "Thu PM", "Fri AM", "Fri PM", "Sat AM", "Sat PM"]
 
 pattern_descriptions = (
-    "Roller Coaster",
-    "Huge Spike",
-    "Always Decreasing",
-    "Small Spike",
-    "predicted min/max across all patterns",
+    "Roller Coaster",    # 0
+    "Huge Spike",        # 1
+    "Always Decreasing", # 2
+    "Small Spike",       # 3
+    "predicted min/max across all patterns",  # 4
 )
 
 
