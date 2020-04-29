@@ -6,10 +6,16 @@ Function abilities include:
 Part of Stalk Market Bot.
 """
 
+import sys
+import time
+import statistics as stats
+import string
 import logging
 import traceback
-import sys
-import string
+import functools
+
+from collections import defaultdict
+
 
 from typing import Union, Optional, List, TYPE_CHECKING
 
@@ -22,22 +28,88 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# async def get_webhook(bot: 'VBot', channel: discord.TextChannel) -> discord.Webhook:
-#     """
-#     Gets the existing webhook from the guild and channel specified. Creates one if it does not exist.
-#     """
-#     if channel.id in bot.webhook_cache.keys():
-#         return bot.webhook_cache[channel.id]
-#
-#     existing_webhooks = await channel.webhooks()
-#     webhook = discord.utils.get(existing_webhooks, user=bot.user)
-#
-#     if webhook is None:
-#         log.warning("Webhook did not exist in channel {}! Creating new webhook!".format(channel.name))
-#         webhook = await channel.create_webhook(name="void", reason="Creating webhook for void")
-#
-#     bot.webhook_cache[channel.id] = webhook
-#     return webhook
+class DBPerformance:
+
+    def __init__(self):
+        self.time = defaultdict(list)
+
+    def avg(self, key: str):
+        return stats.mean(self.time[key])
+
+    def all_avg(self):
+        avgs = {}
+        for key, value in self.time.items():
+            avgs[key] = stats.mean(value)
+        return avgs
+
+    def stats(self):
+        statistics = {}
+        for key, value in self.time.items():
+            loop_stats = {}
+
+            loop_stats['sum'] = sum(value)
+
+            try:
+                loop_stats['avg'] = stats.mean(value)
+            except stats.StatisticsError:
+                loop_stats['avg'] = -1
+
+            try:
+                loop_stats['med'] = stats.median(value)
+            except stats.StatisticsError:
+                loop_stats['med'] = -1
+
+            try:
+                loop_stats['max'] = max(value)
+            except stats.StatisticsError:
+                loop_stats['max'] = -1
+
+            try:
+                loop_stats['min'] = min(value)
+            except stats.StatisticsError:
+                loop_stats['min'] = -1
+
+            loop_stats['calls'] = len(value)
+
+            statistics[key] = loop_stats
+        return statistics
+
+
+perf_stats = DBPerformance()
+
+
+def async_perf_timer(func):
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        response = await func(*args, **kwargs)
+        end_time = time.perf_counter()
+
+        # if len(args) > 1:
+        #     logging.info("DB Query {} from {} in {:.3f} ms.".format(func.__name__, args[1], (end_time - start_time) * 1000))
+        # else:
+        # logging.info("Func {} ran in {:.3f} ms.".format(func.__name__, (end_time - start_time) * 1000))
+        perf_stats.time[func.__name__].append((end_time - start_time) * 1000)
+        return response
+
+    return wrapper
+
+
+def perf_timer(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        start_time = time.perf_counter()
+        response = func(*args, **kwargs)
+        end_time = time.perf_counter()
+
+        # if len(args) > 1:
+        #     logging.info("DB Query {} from {} in {:.3f} ms.".format(func.__name__, args[1], (end_time - start_time) * 1000))
+        # else:
+        # logging.info("Func {} ran in {:.3f} ms.".format(func.__name__, (end_time - start_time) * 1000))
+        perf_stats.time[func.__name__].append((end_time - start_time) * 1000)
+        return response
+
+    return wrapper
 
 
 async def send_long_msg(channel: [discord.TextChannel, commands.Context], message: str, code_block: bool = False, code_block_lang: str = "python"):

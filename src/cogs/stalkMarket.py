@@ -4,6 +4,7 @@ Part of Stalk Market Bot.
 """
 
 import logging
+import time
 
 from datetime import datetime
 from collections import defaultdict
@@ -24,8 +25,8 @@ import db
 import utils.stalkMarketPredictions as sm
 from utils.stalkMarketGraphs import matplotgraph_predictions, matplotgraph_guild_predictions
 
+from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, get_last_weeks_pattern_for_user, UserPredictions
 
-from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, UserPredictions
 from utils.uiElements import BoolPage, StringReactPage
 
 
@@ -348,7 +349,7 @@ class StalkMarket(commands.Cog):
         year = now.year
 
         embed = discord.Embed(title="Remove Price",
-                              description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+                              description=f"Do you wish to remove the recorded price for the week of {day_segment_names[day_segment]}?")
 
         buttons = [
             ("✅", "accept"),
@@ -401,6 +402,81 @@ class StalkMarket(commands.Cog):
                                                     description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
 
 
+    @eCommands.group(name="set_pattern", aliases=["sp"], brief="Records what pattern you had.",
+                     # description="Sets/unsets/shows the default logging channel.",  # , usage='<command> [channel]'
+                     examples=['39', "42"])
+    async def set_pattern(self, ctx: commands.Context):
+
+        est = timezone('US/Eastern')
+        # now = datetime.utcnow()
+        now = est.fromutc(datetime.utcnow())
+
+        current_week = week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
+        year = now.year
+
+        button_desc = f"(Week #{current_week} is this week)\n\nPress the corresponding reaction:\n" \
+                      f"❓: Unknown\n" \
+                      f"{number_emotes[0]}: Roller Coaster\n" \
+                      f"{number_emotes[1]}: Huge Spike\n" \
+                      f"{number_emotes[2]}: Always Decreasing\n" \
+                      f"{number_emotes[3]}: Small Spike"
+
+        embed = discord.Embed(title="Set Pattern",
+                              description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+        buttons = [
+            ("\N{Leftwards Black Arrow}", "left"),
+            ("\N{Black Rightwards Arrow}", "right"),
+            ("❓", "unknown"),
+            (number_emotes[0], "zero"),
+            (number_emotes[1], "one"),
+            (number_emotes[2], "two"),
+            (number_emotes[3], "three"),
+
+        ]
+
+        button_lut = {'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'unknown': -1}
+
+        set_pattern_prompt = StringReactPage(embed=embed, edit_in_place=True, buttons=buttons, allowable_responses=[])
+        while True:
+            response = await set_pattern_prompt.run(ctx)
+
+            if response is None:
+                last_embed = discord.Embed(title="❌ Pattern Set Canceled!",
+                                           description=f"No pattern has been set!")
+                await set_pattern_prompt.finish(last_embed)
+                return
+
+            elif response.content() == "left":
+                if current_week - 3 < week_of_year:
+                    week_of_year -= 1  # Decrement by 1
+
+                set_pattern_prompt.embed = discord.Embed(title="Set Pattern",
+                                                         description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+
+            elif response.content() == "right":
+
+                if current_week + 3 > week_of_year:
+                    week_of_year += 1  # Increment by 1
+
+                set_pattern_prompt.embed = discord.Embed(title="Set Pattern",
+                                                         description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+
+            elif response.content() in button_lut.keys():
+                last_embed = discord.Embed(title="✅ Pattern Set",
+                                           description=f"the pattern for the week of {week_of_year-1} has been set to {sm.pattern_definitions.name(button_lut[response.content()])}")
+
+                await set_pattern_prompt.finish(last_embed)
+
+                await db.set_pattern(self.bot.db_pool, ctx.author.id, year, week_of_year, button_lut[response.content()])
+
+                # remove_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
+                #                          day_segment=day_segment, price=0)
+                # await db.remove_price(self.bot.db_pool, remove_price)
+                #
+                # return
+                return
+
+
     @commands.is_owner()
     @eCommands.command(name="tpredict", #aliases=["list_prices"],
                        brief="Predicts the possible outcomes",
@@ -411,7 +487,7 @@ class StalkMarket(commands.Cog):
 
         prices = await get_prices_for_user(self.bot.db_pool, ctx.author.id)
         # predictions, min_max = sm.get_test_predictions()
-        predictions, min_max, average_prices = sm.get_predictions(prices)
+        predictions, other_data = sm.get_predictions(prices)
 
         desc = f"You have the following possible patterns:"
 
@@ -486,8 +562,14 @@ class StalkMarket(commands.Cog):
             await ctx.send(embed=embed)
             return
         else:
-            predictions, min_max, average_prices = sm.get_predictions(prices)
-            user_prediction = UserPredictions(user.id, user.display_name, predictions, min_max, average_prices)
+            previous_pattern = await get_last_weeks_pattern_for_user(self.bot.db_pool, user.id)
+            previous_pattern = previous_pattern or -1
+
+            start = time.perf_counter()
+            predictions, other_data = sm.get_predictions(prices, previous_pattern)
+            log.info(f"Took: {time.perf_counter() - start} s")
+
+            user_prediction = UserPredictions(user.id, user.display_name, predictions, other_data, previous_pattern)
 
             await self.graph_predict_prices(ctx, user, user_prediction)
 
@@ -500,7 +582,8 @@ class StalkMarket(commands.Cog):
         min_max = user_prediction.min_max
         average_prices = user_prediction.average
 
-        desc = f"You have the following possible outcomes:\n"
+        desc = f"With a previous week pattern of *{sm.pattern_definitions.name(user_prediction.last_pattern)}*," \
+               f"\nYou have the following possible outcomes:\n"
 
         if len(predictions) == 0:
             desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
@@ -508,33 +591,52 @@ class StalkMarket(commands.Cog):
         else:
 
             outcomes = defaultdict(list)
+            guarantied_mins = defaultdict(list)
             outcome_txt = []
             patterns_seen = set()
             for pred in predictions:
                 outcomes[pred.number].append(pred.weekMax)
+                guarantied_mins[pred.number].append(pred.guaranteedMin)
+
                 patterns_seen.add(pred.number)
 
             max_length = 0
             for pattern_num, prices in outcomes.items():
-                pattern_desc = sm.pattern_descriptions[pattern_num]
+                pattern_name = sm.pattern_definitions.name(pattern_num)
                 pattern_spaces = self.get_spaces_for_pattern(pattern_num, patterns_seen)
 
                 if len(prices) == 1:
-                    price_txt = f"Max Price:  {prices[0]}"
-                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}(1 Prediction)"
+                    price_txt = f"Max Price Range: {min(guarantied_mins[pattern_num])} - {max(prices)}"
+                    # pattern_desc = f"*{pattern_name}*{pattern_spaces} \n{(user_prediction.pattern_probability(pattern_num) * 100):.2f}% Chance w/ 1 Prediction"
+                    chance_desc = f"{(user_prediction.pattern_probability(pattern_num) * 100):.2f}% Chance w/ 1 Prediction"
 
                 else:
-                    price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
-                    pattern_txt = f"*{pattern_desc}*{pattern_spaces}({len(prices)} Predictions)"
+                    # price_txt = f"Max Prices: {min(prices)} - {max(prices)}"
+                    price_txt = f"Max Price Range: {min(guarantied_mins[pattern_num])} - {max(prices)}"
+                    # pattern_desc = f"*{pattern_name}*{pattern_spaces} \n{(user_prediction.pattern_probability(pattern_num) * 100):.2f}% Chance w/ {len(prices)} Predictions"
+                    chance_desc = f"{(user_prediction.pattern_probability(pattern_num) * 100):.2f}% Chance w/ {len(prices)} Predictions"
 
                 max_length = len(price_txt) if len(price_txt) > max_length else max_length
-                outcome_txt.append((price_txt, pattern_txt))
+                outcome_txt.append((price_txt, chance_desc, pattern_name))#pattern_desc))
 
-            for price_txt, pattern_txt in outcome_txt:
+                # embed.add_field(name="\N{Zero Width Space}",
+                #                 value=f"__*{pattern_name}*__\n{price_txt}\n{chance_desc}",
+                #                 inline=False)
 
-                desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_txt, width=max_length)
+            for price_txt, chance_desc, pattern_name in outcome_txt:
+                embed_desc = '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, chance_desc, width=max_length)
 
-            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, average_prices)
+                # embed.add_field(name="\N{Zero Width Space}",
+                #                 value=f"__*{pattern_name}*__\n{embed_desc}",  #f"__*{pattern_name}*__\n{price_txt}\n{chance_desc}",
+                #                 inline=False)
+                desc += f"__*{pattern_name}*__\n{embed_desc}"
+
+
+            # for price_txt, pattern_desc in outcome_txt:
+            #
+            #     desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_desc, width=max_length)
+
+            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, user_prediction.expected_prices)#average_prices)
             image_buffer.seek(0)
             image = discord.File(filename="turnipChart.png", fp=image_buffer)
             embed.set_image(url=f"attachment://turnipChart.png")
@@ -548,7 +650,6 @@ class StalkMarket(commands.Cog):
 
         msg = await ctx.send(embed=embed, file=image)
         return msg
-
 
 
     @commands.guild_only()
@@ -567,9 +668,9 @@ class StalkMarket(commands.Cog):
                 pattern_count = pred.prediction_count()
                 embed.add_field(name=" ‌‌‌",
                                 value=f"{number_emotes[i+1]} <@{pred.user_id}>\n"
-                                      f"Max Average Price: **{max(pred.average)}**\n"
-                                      f"Max Possible Price: **{pred.min_max.weekMax}**\n"
-                                      f"Best Pattern: **{pred.best().description}** ({pattern_count[pred.best().number]}/{sum(pattern_count)} predictions)",
+                                      f"Most Likely Max Price: **{max(pred.expected_prices):.2f}**\n"
+                                      f"Max Price Range: **{pred.min_max.guaranteedMin} - {pred.min_max.weekMax}**\n"
+                                      f"Most Likely Pattern: **{pred.best().description}** {pred.pattern_probability(pred.best().number)*100:.2f}% Chance",#( {pattern_count[pred.best().number]}/{sum(pattern_count)} predictions)",
                                 inline=False)
 
             image_buffer = matplotgraph_guild_predictions(user_predictions)

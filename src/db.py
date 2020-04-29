@@ -64,6 +64,7 @@ class DBPerformance:
 
 db_perf = DBPerformance()
 
+
 async def create_db_pool(uri: str) -> asyncpg.pool.Pool:
 
     # FIXME: Error Handling
@@ -188,6 +189,61 @@ async def remove_price(pool, price: Prices):
                            price.user_id, price.account_id, price.year, price.week, price.day_segment)
 
 
+# --- Week Info Functions --- #
+
+async def set_this_weeks_pattern(pool, user_id: int, year: int, week: int, pattern_num: Optional[int]):
+    """This sets the current weeks pattern for the date given."""
+    # pattern_num = pattern_num or -1  # -1 == Not yet set
+    week = week + 1  # FIXME: Account for year rollover.
+    await set_pattern(pool, user_id, year, week, pattern_num)
+
+
+@db_deco
+async def set_pattern(pool, user_id: int, year: int, week: int, pattern_num: Optional[int]):
+    """This sets last weeks pattern OF THE date given."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO week_info(user_id, account_id, year, week, previous_pattern) VALUES($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, account_id, year, week)
+            DO UPDATE
+            SET previous_pattern = EXCLUDED.previous_pattern
+            """, user_id, 0, year, week, pattern_num)
+
+
+@db_deco
+async def get_last_pattern(pool, user_id: int, year: int, week: int) -> Optional[int]:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM week_info WHERE user_id = $1 AND account_id = $2 AND year = $3 AND week = $4", user_id, 0, year, week)
+        if row is None:
+            return None
+        else:
+            return row['previous_pattern']
+
+
+@db_deco
+async def set_first_time_buyer(pool, user_id: int, year: int, week: int, first_time_buyer: bool):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO week_info(user_id, account_id, year, week, first_time_buyer) VALUES($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, account_id, year, week)
+            DO UPDATE
+            SET first_time_buyer = EXCLUDED.first_time_buyer
+            """, user_id, 0, year, week, first_time_buyer)
+
+
+@db_deco
+async def get_first_time_buyer(pool, user_id: int, year: int, week: int) -> Optional[bool]:
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM week_info WHERE user_id = $1 AND account_id = $2 AND year = $3 AND week = $4", user_id, 0,
+            year, week)
+        if row is None:
+            return None
+        else:
+            return row['first_time_buyer']
+
 
 async def create_tables(pool):
     # Create tables
@@ -215,5 +271,18 @@ async def create_tables(pool):
                                PRIMARY KEY (user_id, account_id, year, week, day_segment)
                                )
                            ''')
+
+        # previous_pattern is LAST weeks pattern as that is what is relevent to THIS week.
+        await conn.execute('''
+                                   CREATE TABLE if not exists week_info(
+                                       user_id             BIGINT,
+                                       account_id          BIGINT DEFAULT 0,
+                                       year                INTEGER,
+                                       week                INTEGER,
+                                       first_time_buyer    BOOL DEFAULT FALSE,
+                                       previous_pattern    INTEGER DEFAULT null, 
+                                       PRIMARY KEY (user_id, account_id, year, week)
+                                       )
+                                   ''')
 
 

@@ -4,5 +4,7 @@ psutil
 dateparser
 pytz
 timezonefinder
+numpy
 scipy
 matplotlib
+cython

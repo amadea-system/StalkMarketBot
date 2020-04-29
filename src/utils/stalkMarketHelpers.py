@@ -34,8 +34,8 @@ class UserPredictions:
     user_id: int
     user_name: str
     patterns: List[sm.Pattern]
-    min_max: sm.Pattern
-    average: List[float]
+    other_data: sm.OverallPatternData
+    last_pattern: int
 
     def best(self) -> Optional[sm.Pattern]:
         return self.patterns[0] if len(self.patterns) > 0 else None
@@ -53,6 +53,30 @@ class UserPredictions:
             len(list(filter(lambda x: x.number == 3, self.patterns))),
         )
         return count
+
+
+    @property
+    def min_max(self) -> sm.Pattern:
+        return self.other_data.min_max_data
+
+
+    @property
+    def average(self) -> List[float]:
+        return self.other_data.average_prices
+
+
+    @property
+    def expected_prices(self) -> List[float]:
+        return self.other_data.expected_prices
+
+
+    @property
+    def total_probabilities(self) -> List[float]:
+        return self.other_data.total_probabilities
+
+
+    def pattern_probability(self, pattern_number: int) -> float:
+        return self.other_data.total_probabilities[pattern_number]
 
 
 async def get_prices_for_user(db_pool: 'Pool', user_id: int, date=None) -> List[db.Prices]:
@@ -79,6 +103,19 @@ async def get_prices_for_user_on_year_week(db_pool: 'Pool', user_id: int, year: 
     return prices
 
 
+async def get_last_weeks_pattern_for_user(db_pool: 'Pool', user_id: int, date=None) -> Optional[int]:
+    if date is None:
+        est = timezone('US/Eastern')
+        date = est.fromutc(datetime.utcnow())
+
+    week_of_year = int(date.strftime("%U"))  # TODO: account for begining of the year
+    year = date.year
+
+    pattern = await db.get_last_pattern(db_pool, user_id, year, week_of_year)
+
+    return pattern
+
+
 @async_perf_timer
 async def get_guild_user_predictions(db_pool: 'Pool', guild_id: Optional[int] = None, guild: Optional['Guild'] = None) -> List[UserPredictions]:
     if guild_id is None and guild is None:
@@ -92,18 +129,22 @@ async def get_guild_user_predictions(db_pool: 'Pool', guild_id: Optional[int] = 
     user_predictions = []
     for user in users:
         prices = await get_prices_for_user(db_pool, user.user_id)
+        last_pattern = await get_last_weeks_pattern_for_user(db_pool, user.user_id)
+        if last_pattern is None:
+            last_pattern = -1
+
         if len(prices) > 0:
-            predictions, min_max, average_prices = sm.get_predictions(prices)
+            predictions, other_data = sm.get_predictions(prices, last_pattern)
 
             d_member: 'Member' = guild.get_member(user.user_id) if guild is not None else None
 
             user_name = d_member.display_name if d_member is not None else f"User ID: {user.user_id}"#"Unknown"
 
-            user_predictions.append(UserPredictions(user.user_id, user_name, predictions, min_max, average_prices))
+            user_predictions.append(UserPredictions(user.user_id, user_name, predictions, other_data, last_pattern))
 
-    # Sort the user predictions from greatest to least by using the highest average price.
+    # Sort the user predictions from greatest to least by using the highest Expected price.
     def sort_func(_predictions: UserPredictions):
-        return max(_predictions.average)
+        return max(_predictions.expected_prices)
 
     user_predictions.sort(reverse=True, key=sort_func)
 
