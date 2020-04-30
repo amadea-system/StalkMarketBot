@@ -6,7 +6,7 @@ Part of Stalk Market Bot.
 import logging
 import time
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import TYPE_CHECKING, Optional
 
@@ -25,7 +25,7 @@ import db
 import utils.stalkMarketPredictions as sm
 from utils.stalkMarketGraphs import matplotgraph_predictions, matplotgraph_guild_predictions
 
-from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, get_last_weeks_pattern_for_user, UserPredictions
+from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, get_last_weeks_pattern_for_user, UserPredictions, TurnipDate
 
 from utils.uiElements import BoolPage, StringReactPage
 
@@ -151,24 +151,8 @@ class StalkMarket(commands.Cog):
                      examples=['39', "42"])
     async def add_new_price_now(self, ctx: commands.Context, price: int):
 
-        est = timezone('US/Eastern')
-        # now = datetime.utcnow()
-        now = est.fromutc(datetime.utcnow())
-
-        day_of_week = int(now.strftime("%w"))
-        if now.hour >= 12:  # Past noon.
-            day_segment = day_of_week * 2 + 1
-        else:
-            day_segment = day_of_week * 2
-
-        if day_segment == 1:
-            day_segment = 0
-            # await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
-            # return
-
-        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
-        await self.add_new_price_handler(ctx, price, year, week_of_year, day_segment)
+        now = TurnipDate()
+        await self.add_new_price_handler(ctx, price, now.year, now.week, now.day_segment)
 
 
     async def add_new_price_handler(self, ctx: commands.Context, price: int, year: int, week: int, day_segment: int):
@@ -235,6 +219,7 @@ class StalkMarket(commands.Cog):
 
         if len(prices) == 0:
             await ctx.send_help(self.bulk_add_price)
+            return
 
         if len(prices) > 12:
             await ctx.send("\N{WARNING SIGN} Too many prices entered! There are only 12 different sell prices in the week!")
@@ -250,30 +235,26 @@ class StalkMarket(commands.Cog):
 
             parsed_prices.append(parsed_price)
 
-        now = datetime.utcnow()
-        day_segment = 2
-
-        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
+        now = TurnipDate(day_seg=2)
 
         embed = discord.Embed(title=f"Add New Prices", description="Are you sure you want to add the following prices?")
 
         for price in parsed_prices:
             if price is not None:
-                embed.add_field(name=day_segment_names[day_segment], value=f"{price} Bells")
-            day_segment += 1
+                embed.add_field(name=day_segment_names[now.day_segment], value=f"{price} Bells")
+            now.next_day() # day_segment += 1
 
         confirmation = BoolPage(embed=embed)
 
         response = await confirmation.run(ctx)
         if response:
-            day_segment = 2
+            now.day_segment = 2
             for price in parsed_prices:
                 if price is not None:
-                    new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-                                          day_segment=day_segment, price=price)
+                    new_price = db.Prices(user_id=ctx.author.id, account_id=0, year=now.year, week=now.week,
+                                          day_segment=now.day_segment, price=price)
                     await db.add_price(self.bot.db_pool, new_price)
-                day_segment += 1
+                now.next_day() # day_segment += 1
 
             await ctx.send(f"Prices set!")
         else:
@@ -291,19 +272,8 @@ class StalkMarket(commands.Cog):
             await ctx.send(f"Error! Unable to determine when {date} is!")
             return
 
-        day_of_week = int(now.strftime("%w"))
-        if now.hour >= 12:  # Past noon.
-            day_segment = day_of_week * 2 + 1
-        else:
-            day_segment = day_of_week * 2
-
-        if day_segment == 1:
-            day_segment = 0
-
-        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
-
-        await self.add_new_price_handler(ctx, price, year, week_of_year, day_segment)
+        turnip_now = TurnipDate.from_datetime(now)
+        await self.add_new_price_handler(ctx, price, turnip_now.year, turnip_now.week, turnip_now.day_segment)
 
 
     @eCommands.command(name="list", aliases=["list_prices"],
@@ -330,26 +300,10 @@ class StalkMarket(commands.Cog):
                        brief="Allows you tto remove a recorded price from the current week",
                        examples=[''])
     async def remove(self, ctx: commands.Context):
-        est = timezone('US/Eastern')
-        # now = datetime.utcnow()
-        now = est.fromutc(datetime.utcnow())
-
-        day_of_week = int(now.strftime("%w"))
-        if now.hour >= 12:  # Past noon.
-            day_segment = day_of_week * 2 + 1
-        else:
-            day_segment = day_of_week * 2
-
-        if day_segment == 1:
-            day_segment = 0
-            # await ctx.send(f"Error! You can not set a price for Sunday Afternoon!")
-            # return
-
-        week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
+        now = TurnipDate()
 
         embed = discord.Embed(title="Remove Price",
-                              description=f"Do you wish to remove the recorded price for the week of {day_segment_names[day_segment]}?")
+                              description=f"Do you wish to remove the recorded price for {day_segment_names[now.day_segment]}?")
 
         buttons = [
             ("✅", "accept"),
@@ -369,52 +323,40 @@ class StalkMarket(commands.Cog):
 
             elif response.content() == "accept":
                 last_embed = discord.Embed(title="✅ Price Removed",
-                                           description=f"The price of for {day_segment_names[day_segment]} was removed.")
+                                           description=f"The price of for {day_segment_names[now.day_segment]} was removed.")
                 await remove_prompt.finish(last_embed)
 
-                remove_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-                                         day_segment=day_segment, price=0)
+                remove_price = db.Prices(user_id=ctx.author.id, account_id=0, year=now.year, week=now.week,
+                                         day_segment=now.day_segment, price=0)
                 await db.remove_price(self.bot.db_pool, remove_price)
 
                 return
 
             elif response.content() == "left":
-                if day_segment == 0:
-                    pass
-                elif day_segment == 2:
-                    day_segment = 0  # Skip 1
-                else:
-                    day_segment -= 1  # Decrement by 1
+                now.prev_day()
 
                 remove_prompt.embed = discord.Embed(title="Remove Price",
-                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[now.day_segment]}?")
 
             elif response.content() == "right":
-
-                if day_segment == 0:
-                    day_segment = 2  # Skip 1
-                elif day_segment == 13:
-                    pass
-                else:
-                    day_segment += 1  # Increment by 1
+                now.next_day()
 
                 remove_prompt.embed = discord.Embed(title="Remove Price",
-                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[day_segment]}?")
+                                                    description=f"Do you wish to remove the recorded price for {day_segment_names[now.day_segment]}?")
 
 
     @eCommands.group(name="set_pattern", aliases=["sp"], brief="Records what pattern you had.",
                      # description="Sets/unsets/shows the default logging channel.",  # , usage='<command> [channel]'
-                     examples=['39', "42"])
+                     examples=[''])
     async def set_pattern(self, ctx: commands.Context):
 
-        est = timezone('US/Eastern')
-        # now = datetime.utcnow()
-        now = est.fromutc(datetime.utcnow())
+        now = TurnipDate(day_seg=0)
+        now.next_week()
+        now.instantiated_week = now.week
 
-        current_week = week_of_year = int(now.strftime("%U"))  # TODO: account for begining of the year
-        year = now.year
+        last_week_offset = timedelta(weeks=-1)
 
-        button_desc = f"(Week #{current_week} is this week)\n\nPress the corresponding reaction:\n" \
+        button_desc = f"\n\nPress the corresponding reaction:\n" \
                       f"❓: Unknown\n" \
                       f"{number_emotes[0]}: Roller Coaster\n" \
                       f"{number_emotes[1]}: Huge Spike\n" \
@@ -422,7 +364,7 @@ class StalkMarket(commands.Cog):
                       f"{number_emotes[3]}: Small Spike"
 
         embed = discord.Embed(title="Set Pattern",
-                              description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+                              description=f"Do you wish to set the pattern for the week of {now.to_week_str(last_week_offset)}?\n{button_desc}")
         buttons = [
             ("\N{Leftwards Black Arrow}", "left"),
             ("\N{Black Rightwards Arrow}", "right"),
@@ -447,33 +389,25 @@ class StalkMarket(commands.Cog):
                 return
 
             elif response.content() == "left":
-                if current_week - 3 < week_of_year:
-                    week_of_year -= 1  # Decrement by 1
+                now.prev_week()
 
                 set_pattern_prompt.embed = discord.Embed(title="Set Pattern",
-                                                         description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+                                                         description=f"Do you wish to set the pattern for the week of {now.to_week_str(last_week_offset)}?\n{button_desc}")
 
             elif response.content() == "right":
-
-                if current_week + 3 > week_of_year:
-                    week_of_year += 1  # Increment by 1
+                now.next_week()
 
                 set_pattern_prompt.embed = discord.Embed(title="Set Pattern",
-                                                         description=f"Do you wish to set the pattern for the week of {week_of_year-1}?\n{button_desc}")
+                                                         description=f"Do you wish to set the pattern for the week of {now.to_week_str(last_week_offset)}?\n{button_desc}")
 
             elif response.content() in button_lut.keys():
                 last_embed = discord.Embed(title="✅ Pattern Set",
-                                           description=f"the pattern for the week of {week_of_year-1} has been set to {sm.pattern_definitions.name(button_lut[response.content()])}")
+                                           description=f"the pattern for the week of {now.to_week_str(last_week_offset)} has been set to {sm.pattern_definitions.name(button_lut[response.content()])}")
 
                 await set_pattern_prompt.finish(last_embed)
 
-                await db.set_pattern(self.bot.db_pool, ctx.author.id, year, week_of_year, button_lut[response.content()])
-
-                # remove_price = db.Prices(user_id=ctx.author.id, account_id=0, year=year, week=week_of_year,
-                #                          day_segment=day_segment, price=0)
-                # await db.remove_price(self.bot.db_pool, remove_price)
-                #
-                # return
+                log.info(f"Setting pattern for week {now.week} to {button_lut[response.content()]}")
+                await db.set_pattern(self.bot.db_pool, ctx.author.id, now.year, now.week, button_lut[response.content()])
                 return
 
 
@@ -545,6 +479,37 @@ class StalkMarket(commands.Cog):
         spaces = f"\N{EM QUAD}{em_quads[pattern_num]}{pattern_space_table[pattern_num]}"
         return spaces
 
+
+    @eCommands.command(name="graph_user",  # , aliases=["predict"],
+                       brief="Graphs the possible outcomes for the week",
+                       description="Graphs the possible outcomes for the week. You can also graph another users "
+                                   "possible outcomes by including thier discord mention or User ID with the command.",
+                       examples=["", "@Hibiki", "389590123654012632"],
+                       hidden=True)
+    async def graph_predict_prices_cmd_for_user_id(self, ctx: commands.Context, user_id: int):
+
+        user = self.bot.get_user(user_id)
+        display_name = user.display_name if user is not None else "Unknown"
+
+        prices = await get_prices_for_user(self.bot.db_pool, user_id)
+        if len(prices) == 0:
+            embed = discord.Embed(title=f"Price predictions for {display_name}",
+                                  description="\N{WARNING SIGN} Can not make a prediction as no prices have been recorded yet!")
+            await ctx.send(embed=embed)
+            return
+        else:
+            previous_pattern = await get_last_weeks_pattern_for_user(self.bot.db_pool, user_id)
+            previous_pattern = previous_pattern or -1
+
+            start = time.perf_counter()
+            predictions, other_data = sm.get_predictions(prices, previous_pattern)
+            log.info(f"Took: {time.perf_counter() - start} s")
+
+            user_prediction = UserPredictions(user_id, display_name, predictions, other_data, previous_pattern)
+
+            await self.graph_predict_prices(ctx, user, user_prediction)
+
+
     @eCommands.command(name="graph",#, aliases=["predict"],
                        brief="Graphs the possible outcomes for the week",
                        description="Graphs the possible outcomes for the week. You can also graph another users "
@@ -563,7 +528,8 @@ class StalkMarket(commands.Cog):
             return
         else:
             previous_pattern = await get_last_weeks_pattern_for_user(self.bot.db_pool, user.id)
-            previous_pattern = previous_pattern or -1
+            if previous_pattern is None:
+                previous_pattern = -1
 
             start = time.perf_counter()
             predictions, other_data = sm.get_predictions(prices, previous_pattern)
@@ -576,11 +542,9 @@ class StalkMarket(commands.Cog):
 
     async def graph_predict_prices(self, ctx: commands.Context, user: discord.Member, user_prediction: UserPredictions) -> discord.Message:
 
-        embed = discord.Embed(title=f"Price predictions for {user.display_name}")
+        embed = discord.Embed(title=f"Price predictions for {user_prediction.user_name}")
 
         predictions = user_prediction.patterns
-        min_max = user_prediction.min_max
-        average_prices = user_prediction.average
 
         desc = f"With a previous week pattern of *{sm.pattern_definitions.name(user_prediction.last_pattern)}*," \
                f"\nYou have the following possible outcomes:\n"
@@ -636,7 +600,7 @@ class StalkMarket(commands.Cog):
             #
             #     desc += '{0}`{1:<{width}}`\N{EM QUAD}{2}\n'.format(0 * ' ', price_txt, pattern_desc, width=max_length)
 
-            image_buffer = matplotgraph_predictions(ctx.author, predictions, min_max, user_prediction.expected_prices)#average_prices)
+            image_buffer = matplotgraph_predictions(ctx.author, predictions, user_prediction.min_max, user_prediction.expected_prices)#average_prices)
             image_buffer.seek(0)
             image = discord.File(filename="turnipChart.png", fp=image_buffer)
             embed.set_image(url=f"attachment://turnipChart.png")
