@@ -25,7 +25,7 @@ import db
 import utils.stalkMarketPredictions as sm
 from utils.stalkMarketGraphs import matplotgraph_predictions, matplotgraph_guild_predictions
 
-from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, get_last_weeks_pattern_for_user, UserPredictions, TurnipDate
+from utils.stalkMarketHelpers import get_prices_for_user, get_guild_user_predictions, get_last_weeks_pattern_for_user, UserPredictions, TurnipDate, day_name_lut, am_pm_lut
 
 from utils.uiElements import BoolPage, StringReactPage
 
@@ -262,9 +262,40 @@ class StalkMarket(commands.Cog):
 
 
     @eCommands.command(name="add_price_at", aliases=["add_at", "ap_at"],
+                       brief="Add a new price for a given day and time period.",
+                       examples=['39 Monday Morning', "120 tue am", "420 t a", "69 th p"])
+    async def add_new_price_at(self, ctx: commands.Context, price: Optional[int] = None, day: Optional[str] = None,
+                               time_period: Optional[str] = None):
+        await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
+
+        if price is None or day is None or time_period is None:  # if any arguments are omitted, send help.
+            await ctx.send_help(self.add_new_price_at)
+            return
+
+        day = day.strip().lower()
+        time_period = time_period.strip().lower()
+        day_num = day_name_lut[day] if day in day_name_lut else None
+        time_period_num = am_pm_lut[time_period] if time_period in am_pm_lut else None
+
+        if day_num is None and time_period_num is None:
+            await ctx.send(f"Error! Unable to parse the day or time period!")
+            return
+        elif day_num is None:
+            await ctx.send(f"Error! Unable to parse the day!")
+            return
+        elif time_period_num is None:
+            await ctx.send(f"Error! Unable to parse the time period!")
+            return
+
+        day_seg = day_num + time_period_num
+        date = TurnipDate(day_seg=day_seg)
+
+        await self.add_new_price_handler(ctx, price, date.year, date.week, date.day_segment)
+
+    @eCommands.command(name="add_price_at_date", aliases=["add_at_date", "ap_at_d"],
                        brief="Add a new price at a specific date & time.",
                        examples=['39 1 day and 6 hours ago utc+1', "42 4/5 11:00am est"])
-    async def add_new_price_at(self, ctx: commands.Context, price: int, *, date: str):
+    async def add_new_price_at_date(self, ctx: commands.Context, price: int, *, date: str):
         await db.add_account(self.bot.db_pool, ctx.guild.id, ctx.author.id, 0, "")
 
         now = dateparser.parse(date)

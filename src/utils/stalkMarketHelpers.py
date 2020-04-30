@@ -27,6 +27,89 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# --- Constants --- #
+
+day_name_lut = {
+    # Sunday
+    "sunday": 0,
+    "sunda": 0,
+    "sund": 0,
+    "sun": 0,
+    "su": 0,
+    # "s": 0,
+
+    # Monday
+    "monday": 2,
+    "monda": 2,
+    "mond": 2,
+    "mon": 2,
+    "mo": 2,
+    "m": 2,
+
+    # Tuesday
+    "tuesday": 4,
+    "tuesda": 4,
+    "tuesd": 4,
+    "tues": 4,
+    "tue": 4,
+    "tu": 4,
+    "t": 4,
+
+    # wednesday
+    "wednesday": 6,
+    "wednesda": 6,
+    "wednesd": 6,
+    "wednes": 6,
+    "wedne": 6,
+    "wedn": 6,
+    "wed": 6,
+    "we": 6,
+    "w": 6,
+
+    #thursday
+    "thursday": 8,
+    "thursda": 8,
+    "thurs": 8,
+    "thur": 8,
+    "thu": 8,
+    "th": 8,
+
+    #friday
+    "friday": 10,
+    "frida": 10,
+    "frid": 10,
+    "fri": 10,
+    "fr": 10,
+    "f": 10,
+
+    #saturday
+    "saturday": 12,
+    "saturda": 12,
+    "saturd": 12,
+    "satur": 12,
+    "satu": 12,
+    "sat": 12,
+    "sa": 12,
+    "s": 12,
+}
+
+am_pm_lut = {
+    'morning': 0,
+    'morn': 0,
+    'am': 0,
+    'a': 0,
+
+    'afternoon': 1,
+    'noon': 1,
+    'after': 1,
+    'evening': 1,
+    'even': 1,
+    'eve': 1,
+    'pm': 1,
+    'p': 1
+}
+
+
 # --- ClaSSES --- #
 
 @dataclass
@@ -99,7 +182,7 @@ class TurnipDate:
                 if day_segment == 1:  # Make sure to avoid the invalid segment 1 (Sun PM)
                     day_segment = 0
             else:
-                day_segment = day_seg
+                day_segment = day_seg if day_seg != 1 else 0
 
             self._day_segment: int = day_segment
 
@@ -218,6 +301,8 @@ class TurnipDate:
         dt = datetime.strptime(f"{self.year},{self.week},{day_of_week},{hour_of_day}", self.datetime_format)
         return dt
 
+
+# --- Functions --- #
 
 async def get_prices_for_user(db_pool: 'Pool', user_id: int, date: Optional[TurnipDate] = None) -> List[db.Prices]:
     if date is None:
