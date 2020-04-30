@@ -353,11 +353,12 @@ async def get_guild_user_predictions(db_pool: 'Pool', guild_id: Optional[int] = 
         if len(prices) > 0:
             predictions, other_data = sm.get_predictions(prices, last_pattern)
 
-            d_member: 'Member' = guild.get_member(user.user_id) if guild is not None else None
+            if len(predictions) > 0:  # Avoid passing in invalid data.
+                d_member: 'Member' = guild.get_member(user.user_id) if guild is not None else None
 
-            user_name = d_member.display_name if d_member is not None else f"User ID: {user.user_id}"#"Unknown"
+                user_name = d_member.display_name if d_member is not None else f"User ID: {user.user_id}"#"Unknown"
 
-            user_predictions.append(UserPredictions(user.user_id, user_name, predictions, other_data, last_pattern))
+                user_predictions.append(UserPredictions(user.user_id, user_name, predictions, other_data, last_pattern))
 
     # Sort the user predictions from greatest to least by using the highest Expected price.
     def sort_func(_predictions: UserPredictions):
