@@ -457,7 +457,7 @@ class StalkMarket(commands.Cog):
         desc = f"You have the following possible patterns:"
 
         if len(predictions) == 0:
-            desc += "\n**None!!!**\n**It is likely that the dataset is incorrect.**"
+            desc += "\n**None!!!**\n**It is likely that the dataset is incorrect, the pattern we have stored for last week is incorrect, or .**"
 
         for prediction in predictions:
             # desc.append(prediction.description)
@@ -577,13 +577,16 @@ class StalkMarket(commands.Cog):
 
         predictions = user_prediction.patterns
 
-        desc = f"With a previous week pattern of *{sm.pattern_definitions.name(user_prediction.last_pattern)}*," \
-               f"\nYou have the following possible outcomes:\n"
-
         if len(predictions) == 0:
-            desc += "**None!!!**\n**It is likely that your recorded price(s) are incorrect.**"
+            desc = f"**Unable to predict any possibilities!**\n" \
+                   f"It is likely that either your recorded price(s) are incorrect,\n" \
+                   f"Your stored pattern of *{sm.pattern_definitions.name(user_prediction.last_pattern)}* is incorrect,\n" \
+                   f"This was the first week you purchased turnips on *your* island,\n" \
+                   f"Or you time traveled this week."
             image = None
         else:
+            desc = f"With a previous week pattern of *{sm.pattern_definitions.name(user_prediction.last_pattern)}*," \
+                   f"\nYou have the following possible outcomes:\n"
 
             outcomes = defaultdict(list)
             guarantied_mins = defaultdict(list)
