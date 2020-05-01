@@ -45,7 +45,6 @@ day_segment_names = ["Sunday Buy Price", "N/A", "Mon AM", "Mon PM", "Tue AM", "T
 rate_multiplier = 10000  # Separately defined in fastStonks.pyx
 
 RATE_MULTIPLIER = rate_multiplier
-FUDGE_FACTOR = 2#5
 
 # used_decays = set()
 decay_cache = {}  # Cache for calculating the convolution of two Uniform PDFs
@@ -666,486 +665,499 @@ def range_intersect_length(range1: Tuple[float, float], range2: Tuple[float, flo
     # return range_length(range_intersect(range1, range2))
 
 
-def multiply_pattern_probability(patterns: List[Pattern], probability: float) -> List[Pattern]:
+class PredictPatterns:
 
-    # an example of what could call this:
-    # multiply_generator_probability( generator = generate_pattern_1_with_peak(given_prices, peak_start),
-    #                                 probability = 1 / (10 - 3)
+    def __init__(self):
+        self.fudge_factor = 0
 
-    for pattern in patterns:
-        pattern.adjust_probability(probability)
+    def multiply_pattern_probability(self, patterns: List[Pattern], probability: float) -> List[Pattern]:
 
-    return patterns
+        # an example of what could call this:
+        # multiply_generator_probability( generator = generate_pattern_1_with_peak(given_prices, peak_start),
+        #                                 probability = 1 / (10 - 3)
+
+        for pattern in patterns:
+            pattern.adjust_probability(probability)
+
+        return patterns
 
 
-def generate_individual_random_price(given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, length: int, rate_min: float, rate_max: float) -> float:
-    """
-        * This corresponds to the code:
-        *   for (int i = start; i < start + length; i++)
-        *   {
-        *     sellPrices[work++] =
-        *       intceil(randfloat(rate_min / RATE_MULTIPLIER, rate_max / RATE_MULTIPLIER) * basePrice);
-        *   }
-        *
-        * Would return the conditional probability given the given_prices, and modify
-        * the predicted_prices array.
-        * If the given_prices won't match, returns 0.
-    """
-    # FIXME: Actually explicitly return the modified predicted_prices List instead of the whole modify thing we are doing now.
+    def generate_individual_random_price(self, given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, length: int, rate_min: float, rate_max: float) -> float:
+        """
+            * This corresponds to the code:
+            *   for (int i = start; i < start + length; i++)
+            *   {
+            *     sellPrices[work++] =
+            *       intceil(randfloat(rate_min / RATE_MULTIPLIER, rate_max / RATE_MULTIPLIER) * basePrice);
+            *   }
+            *
+            * Would return the conditional probability given the given_prices, and modify
+            * the predicted_prices array.
+            * If the given_prices won't match, returns 0.
+        """
+        # FIXME: Actually explicitly return the modified predicted_prices List instead of the whole modify thing we are doing now.
 
-    rate_min *= rate_multiplier
-    rate_max *= rate_multiplier
+        rate_min *= rate_multiplier
+        rate_max *= rate_multiplier
 
-    buy_price = given_prices[0]
-    rate_range = (rate_min, rate_max)
+        buy_price = given_prices[0]
+        rate_range = (rate_min, rate_max)
 
-    prob = 1
+        prob = 1
 
-    for i in range(start, start+length):
-        min_pred = get_price(rate_min, buy_price)
-        max_pred = get_price(rate_max, buy_price)
+        for i in range(start, start+length):
+            min_pred = get_price(rate_min, buy_price)
+            max_pred = get_price(rate_max, buy_price)
 
-        if given_prices[i] is not None:
-            if given_prices[i] < min_pred - FUDGE_FACTOR or given_prices[i] > max_pred + FUDGE_FACTOR:
+            if given_prices[i] is not None:
+                if given_prices[i] < min_pred - self.fudge_factor or given_prices[i] > max_pred + self.fudge_factor:
+                    # Given price is out of predicted range, so this is the wrong pattern
+                    return 0  # FIXME: I think this should be None
+
+                # TODO: How to deal with probability when there's fudge factor?
+                # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
+                real_rate_range = rate_range_from_given_and_base(clamp(given_prices[i], min_pred, max_pred), buy_price)
+                prob *= range_intersect_length(rate_range, real_rate_range) / range_length(rate_range)
+
+                if prob == 0:
+                    log.warning(f"Prob was 0 in generate_individual_random_price")
+
+                min_pred = given_prices[i]
+                max_pred = given_prices[i]
+
+            predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
+
+        return prob
+
+
+    def generate_decreasing_random_price(self, given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, length: int, start_rate_min, start_rate_max, rate_decay_min, rate_decay_max):
+        # region Description
+        """
+         This corresponds to the code:
+           rate = randfloat(start_rate_min, start_rate_max);
+           for (int i = start; i < start + length; i++)
+           {
+             sellPrices[work++] = intceil(rate * basePrice);
+             rate -= randfloat(rate_decay_min, rate_decay_max);
+           }
+
+         Would return the conditional probability given the given_prices, and modify
+         the predicted_prices array.
+         If the given_prices won't match, returns 0.
+          """
+        # endregion
+
+        # pdf_archive = []
+        start_rate_min *= RATE_MULTIPLIER
+        start_rate_max *= RATE_MULTIPLIER
+        rate_decay_min *= RATE_MULTIPLIER
+        rate_decay_max *= RATE_MULTIPLIER
+
+        buy_price = given_prices[0]
+        rate_pdf = PDF(start_rate_min, start_rate_max)
+        prob = 1
+
+        for i in range(start, start + length):
+            # min_pred = get_price(rate_pdf.min_value(), buy_price)
+            # max_pred = get_price(rate_pdf.max_value(), buy_price)
+            min_pred = get_price(rate_pdf.min_value(),  buy_price)
+            max_pred = get_price(rate_pdf.max_value(), buy_price)
+
+            if given_prices[i] is not None:
+                if given_prices[i] < min_pred - self.fudge_factor or given_prices[i] > max_pred + self.fudge_factor:
+                    # Given price is out of predicted range, so this is the wrong pattern
+                    return 0  # FIXME: I think this should be None
+
+                # TODO: How to deal with probability when there's fudge factor?
+                # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
+                real_rate_range = rate_range_from_given_and_base(clamp(given_prices[i], min_pred, max_pred), buy_price)
+                prob *= rate_pdf.range_limit(real_rate_range)
+                if prob == 0:
+                    return 0
+
+                min_pred = given_prices[i]
+                max_pred = given_prices[i]
+
+            predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
+
+            # pdf_archive.append(rate_pdf.prob[:])
+
+            rate_pdf.decay(rate_decay_min, rate_decay_max)
+            # log.info("")
+
+        return prob
+
+
+    def generate_peak_price(self, given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, rate_min: float, rate_max: float):
+        """
+         This corresponds to the code:
+           rate = randfloat(rate_min, rate_max);
+           sellPrices[work++] = intceil(randfloat(rate_min, rate) * basePrice) - 1;
+           sellPrices[work++] = intceil(rate * basePrice);
+           sellPrices[work++] = intceil(randfloat(rate_min, rate) * basePrice) - 1;
+
+         Would return the conditional probability given the given_prices, and modify
+         the predicted_prices array.
+         If the given_prices won't match, returns 0.
+        """
+
+        rate_min *= RATE_MULTIPLIER
+        rate_max *= RATE_MULTIPLIER
+
+        buy_price = given_prices[0]
+        prob = 1
+        rate_range = (rate_min, rate_max)
+
+        # Calculate the probability first.
+        # Prob(middle_price)
+        middle_price = given_prices[start + 1]
+        if middle_price is not None:
+            min_pred = get_price(rate_min, buy_price)
+            max_pred = get_price(rate_max, buy_price)
+            if middle_price < min_pred - self.fudge_factor or middle_price > max_pred + self.fudge_factor:
                 # Given price is out of predicted range, so this is the wrong pattern
                 return 0  # FIXME: I think this should be None
 
             # TODO: How to deal with probability when there's fudge factor?
             # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
-            real_rate_range = rate_range_from_given_and_base(clamp(given_prices[i], min_pred, max_pred), buy_price)
+            real_rate_range = rate_range_from_given_and_base(clamp(middle_price, min_pred, max_pred), buy_price)
             prob *= range_intersect_length(rate_range, real_rate_range) / range_length(rate_range)
 
             if prob == 0:
-                log.warning(f"Prob was 0 in generate_individual_random_price")
+                return 0
 
-            min_pred = given_prices[i]
-            max_pred = given_prices[i]
+            rate_range = range_intersect(rate_range, real_rate_range)
 
-        predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
+        left_price = given_prices[start]
+        right_price = given_prices[start + 2]
 
-    return prob
+        """
+         Prob(left_price | middle_price), Prob(right_price | middle_price)
+        
+         A = rate_range[0], B = rate_range[1], C = rate_min, X = rate, Y = randfloat(rate_min, rate)
+         rate = randfloat(A, B); sellPrices[work++] = intceil(randfloat(C, rate) * basePrice) - 1;
+        
+         => X->U(A,B), Y->U(C,X), Y-C->U(0,X-C), Y-C->U(0,1)*(X-C), Y-C->U(0,1)*U(A-C,B-C),
+         let Z=Y-C,  Z1=A-C, Z2=B-C, Z->U(0,1)*U(Z1,Z2)
+         Prob(Z<=t) = integral_{x=0}^{1} [min(t/x,Z2)-min(t/x,Z1)]/ (Z2-Z1)
+         let F(t, ZZ) = integral_{x=0}^{1} min(t/x, ZZ)
+            1. if ZZ < t, then min(t/x, ZZ) = ZZ -> F(t, ZZ) = ZZ
+            2. if ZZ >= t, then F(t, ZZ) = integral_{x=0}^{t/ZZ} ZZ + integral_{x=t/ZZ}^{1} t/x
+                                         = t - t log(t/ZZ)
+         Prob(Z<=t) = (F(t, Z2) - F(t, Z1)) / (Z2 - Z1)
+         Prob(Y<=t) = Prob(Z>=t-C)
+        """
 
+        for price in (left_price, right_price):
+            if price is None:
+                continue
 
-def generate_decreasing_random_price(given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, length: int, start_rate_min, start_rate_max, rate_decay_min, rate_decay_max):
-    # region Description
-    """
-     This corresponds to the code:
-       rate = randfloat(start_rate_min, start_rate_max);
-       for (int i = start; i < start + length; i++)
-       {
-         sellPrices[work++] = intceil(rate * basePrice);
-         rate -= randfloat(rate_decay_min, rate_decay_max);
-       }
-
-     Would return the conditional probability given the given_prices, and modify
-     the predicted_prices array.
-     If the given_prices won't match, returns 0.
-      """
-    # endregion
-
-    # pdf_archive = []
-    start_rate_min *= RATE_MULTIPLIER
-    start_rate_max *= RATE_MULTIPLIER
-    rate_decay_min *= RATE_MULTIPLIER
-    rate_decay_max *= RATE_MULTIPLIER
-
-    buy_price = given_prices[0]
-    rate_pdf = PDF(start_rate_min, start_rate_max)
-    prob = 1
-
-    for i in range(start, start + length):
-        # min_pred = get_price(rate_pdf.min_value(), buy_price)
-        # max_pred = get_price(rate_pdf.max_value(), buy_price)
-        min_pred = get_price(rate_pdf.min_value(),  buy_price)
-        max_pred = get_price(rate_pdf.max_value(), buy_price)
-
-        if given_prices[i] is not None:
-            if given_prices[i] < min_pred - FUDGE_FACTOR or given_prices[i] > max_pred + FUDGE_FACTOR:
+            min_pred = get_price(rate_min, buy_price) - 1
+            max_pred = get_price(rate_range[1], buy_price) - 1
+            if price < min_pred - self.fudge_factor or price > max_pred + self.fudge_factor:
                 # Given price is out of predicted range, so this is the wrong pattern
-                return 0  # FIXME: I think this should be None
+                return 0
 
             # TODO: How to deal with probability when there's fudge factor?
             # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
-            real_rate_range = rate_range_from_given_and_base(clamp(given_prices[i], min_pred, max_pred), buy_price)
-            prob *= rate_pdf.range_limit(real_rate_range)
+            rate2_range = rate_range_from_given_and_base(clamp(price, min_pred, max_pred)+1, buy_price)
+
+            def F(t, ZZ):
+                if t <= 0:
+                    return 0
+
+                if ZZ < t:
+                    return ZZ
+                else:
+                    return t - t * (math.log(t) - math.log(ZZ))
+
+            a, b = rate_range
+            c = rate_min
+            z1 = a - c
+            z2 = b - c
+
+            def PY(t):
+                return (F(t - c, z2) - F(t - c, z1)) / (z2 - z1)
+
+            prob *= PY(rate2_range[1]) - PY(rate2_range[0])
+
             if prob == 0:
                 return 0
 
-            min_pred = given_prices[i]
-            max_pred = given_prices[i]
-
-        predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[i]))
-
-        # pdf_archive.append(rate_pdf.prob[:])
-
-        rate_pdf.decay(rate_decay_min, rate_decay_max)
-        # log.info("")
-
-    return prob
-
-
-def generate_peak_price(given_prices: List[int], predicted_prices: List[MinMaxPrice], start: int, rate_min: float, rate_max: float):
-    """
-     This corresponds to the code:
-       rate = randfloat(rate_min, rate_max);
-       sellPrices[work++] = intceil(randfloat(rate_min, rate) * basePrice) - 1;
-       sellPrices[work++] = intceil(rate * basePrice);
-       sellPrices[work++] = intceil(randfloat(rate_min, rate) * basePrice) - 1;
-
-     Would return the conditional probability given the given_prices, and modify
-     the predicted_prices array.
-     If the given_prices won't match, returns 0.
-    """
-
-    rate_min *= RATE_MULTIPLIER
-    rate_max *= RATE_MULTIPLIER
-
-    buy_price = given_prices[0]
-    prob = 1
-    rate_range = (rate_min, rate_max)
-
-    # Calculate the probability first.
-    # Prob(middle_price)
-    middle_price = given_prices[start + 1]
-    if middle_price is not None:
-        min_pred = get_price(rate_min, buy_price)
-        max_pred = get_price(rate_max, buy_price)
-        if middle_price < min_pred - FUDGE_FACTOR or middle_price > max_pred + FUDGE_FACTOR:
-            # Given price is out of predicted range, so this is the wrong pattern
-            return 0  # FIXME: I think this should be None
-
-        # TODO: How to deal with probability when there's fudge factor?
-        # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
-        real_rate_range = rate_range_from_given_and_base(clamp(middle_price, min_pred, max_pred), buy_price)
-        prob *= range_intersect_length(rate_range, real_rate_range) / range_length(rate_range)
-
-        if prob == 0:
-            return 0
-
-        rate_range = range_intersect(rate_range, real_rate_range)
-
-    left_price = given_prices[start]
-    right_price = given_prices[start + 2]
-
-    """
-     Prob(left_price | middle_price), Prob(right_price | middle_price)
-    
-     A = rate_range[0], B = rate_range[1], C = rate_min, X = rate, Y = randfloat(rate_min, rate)
-     rate = randfloat(A, B); sellPrices[work++] = intceil(randfloat(C, rate) * basePrice) - 1;
-    
-     => X->U(A,B), Y->U(C,X), Y-C->U(0,X-C), Y-C->U(0,1)*(X-C), Y-C->U(0,1)*U(A-C,B-C),
-     let Z=Y-C,  Z1=A-C, Z2=B-C, Z->U(0,1)*U(Z1,Z2)
-     Prob(Z<=t) = integral_{x=0}^{1} [min(t/x,Z2)-min(t/x,Z1)]/ (Z2-Z1)
-     let F(t, ZZ) = integral_{x=0}^{1} min(t/x, ZZ)
-        1. if ZZ < t, then min(t/x, ZZ) = ZZ -> F(t, ZZ) = ZZ
-        2. if ZZ >= t, then F(t, ZZ) = integral_{x=0}^{t/ZZ} ZZ + integral_{x=t/ZZ}^{1} t/x
-                                     = t - t log(t/ZZ)
-     Prob(Z<=t) = (F(t, Z2) - F(t, Z1)) / (Z2 - Z1)
-     Prob(Y<=t) = Prob(Z>=t-C)
-    """
-
-    for price in (left_price, right_price):
-        if price is None:
-            continue
+        """
+         * Then generate the real predicted range.
+         We're doing things in different order then how we calculate probability,
+         since forward prediction is more useful here.
+        
+         Main spike 1
+        """
 
         min_pred = get_price(rate_min, buy_price) - 1
-        max_pred = get_price(rate_range[1], buy_price) - 1
-        if price < min_pred - FUDGE_FACTOR or price > max_pred + FUDGE_FACTOR:
-            # Given price is out of predicted range, so this is the wrong pattern
-            return 0
+        max_pred = get_price(rate_max, buy_price) - 1
 
-        # TODO: How to deal with probability when there's fudge factor?
-        # Clamp the value to be in range now so the probability won't be totally biased to fudged values.
-        rate2_range = rate_range_from_given_and_base(clamp(price, min_pred, max_pred)+1, buy_price)
+        if given_prices[start] is not None:
+            min_pred = given_prices[start]
+            max_pred = given_prices[start]
 
-        def F(t, ZZ):
-            if t <= 0:
-                return 0
+        predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start]))
 
-            if ZZ < t:
-                return ZZ
-            else:
-                return t - t * (math.log(t) - math.log(ZZ))
+        # Main Spike 2
+        min_pred = predicted_prices[start].min
+        max_pred = get_price(rate_max, buy_price)
 
-        a, b = rate_range
-        c = rate_min
-        z1 = a - c
-        z2 = b - c
+        if given_prices[start+1] is not None:
+            min_pred = given_prices[start+1]
+            max_pred = given_prices[start+1]
 
-        def PY(t):
-            return (F(t - c, z2) - F(t - c, z1)) / (z2 - z1)
+        predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start+1]))
 
-        prob *= PY(rate2_range[1]) - PY(rate2_range[0])
+        # Main Spike 3
+        min_pred = get_price(rate_min, buy_price) - 1
+        max_pred = predicted_prices[start + 1].max - 1
 
-        if prob == 0:
-            return 0
+        if given_prices[start+2] is not None:
+            min_pred = given_prices[start + 2]
+            max_pred = given_prices[start + 2]
 
-    """
-     * Then generate the real predicted range.
-     We're doing things in different order then how we calculate probability,
-     since forward prediction is more useful here.
-    
-     Main spike 1
-    """
+        predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start+2]))
 
-    min_pred = get_price(rate_min, buy_price) - 1
-    max_pred = get_price(rate_max, buy_price) - 1
-
-    if given_prices[start] is not None:
-        min_pred = given_prices[start]
-        max_pred = given_prices[start]
-
-    predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start]))
-
-    # Main Spike 2
-    min_pred = predicted_prices[start].min
-    max_pred = get_price(rate_max, buy_price)
-
-    if given_prices[start+1] is not None:
-        min_pred = given_prices[start+1]
-        max_pred = given_prices[start+1]
-
-    predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start+1]))
-
-    # Main Spike 3
-    min_pred = get_price(rate_min, buy_price) - 1
-    max_pred = predicted_prices[start + 1].max - 1
-
-    if given_prices[start+2] is not None:
-        min_pred = given_prices[start + 2]
-        max_pred = given_prices[start + 2]
-
-    predicted_prices.append(MinMaxPrice(min_pred, max_pred, given_prices[start+2]))
-
-    return prob
+        return prob
 
 
-def generate_pattern_0_with_lengths(given_prices: List[int], high_phase_1_len, dec_phase_1_len, high_phase_2_len,
-                                    dec_phase_2_len, high_phase_3_len) -> Optional[Pattern]:
+    def generate_pattern_0_with_lengths(self, given_prices: List[int], high_phase_1_len, dec_phase_1_len, high_phase_2_len,
+                                        dec_phase_2_len, high_phase_3_len) -> Optional[Pattern]:
 
-    buy_price = given_prices[0]
-    predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
+        buy_price = given_prices[0]
+        predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
 
-    probability = 1
+        probability = 1
 
-    # High Phase 1
-    probability *= generate_individual_random_price(given_prices, predicted_prices, start=2, length=high_phase_1_len,
-                                                    rate_min=0.9, rate_max=1.4)
-    if probability == 0:
-        return None
-
-    # Dec Phase 1
-    probability *= generate_decreasing_random_price(given_prices, predicted_prices, start=2 + high_phase_1_len,
-                                                    length=dec_phase_1_len, start_rate_min=0.6, start_rate_max=0.8,
-                                                    rate_decay_min=0.04, rate_decay_max=0.1)
-    if probability == 0:
-        return None
-
-    # High Phase 2
-    probability *= generate_individual_random_price(given_prices, predicted_prices,
-                                                    start=2 + high_phase_1_len + dec_phase_1_len,
-                                                    length=high_phase_2_len, rate_min=0.9, rate_max=1.4)
-    if probability == 0:
-        return None
-
-    # Dec Phase 2
-    probability *= generate_decreasing_random_price(given_prices, predicted_prices,
-                                                    start=2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len,
-                                                    length=dec_phase_2_len, start_rate_min=0.6, start_rate_max=0.8,
-                                                    rate_decay_min=0.04, rate_decay_max=0.1)
-    if probability == 0:
-        return None
-
-    # High Phase 3
-    if 2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len + dec_phase_2_len + high_phase_3_len != 14:
-        raise InconsistentPhaseLengths("Phase lengths don't add up")
-
-    prev_length = 2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len + dec_phase_2_len
-    probability *= generate_individual_random_price(given_prices, predicted_prices,
-                                                    start=prev_length, length=14-prev_length,
-                                                    rate_min=0.9, rate_max=1.4)
-    if probability == 0:
-        return None
-
-    return Pattern(description=pattern_definitions.descriptions[0],  #"Roller Coaster",#"high, decreasing, high, decreasing, high",
-                   number=0,
-                   prices=predicted_prices,
-                   probability=probability)
-
-
-def generate_pattern_0(given_prices: List[int], adjust_prob=True) -> List[Pattern]:
-
-    patterns = []
-    for dec_phase_1_len in range(2, 4):  # dec_phase_1_len
-        for high_phase_1_len in range(0, 7):  # high_phase_1_len
-            for high_phase_3_len in range(0, (7 - high_phase_1_len - 1 + 1)):
-                pattern = generate_pattern_0_with_lengths(given_prices, high_phase_1_len, dec_phase_1_len, 7 - high_phase_1_len - high_phase_3_len, 5 - dec_phase_1_len, high_phase_3_len)
-                if pattern is not None:
-                    if adjust_prob:
-                        pattern.adjust_probability(1 / (4 - 2) / 7 / (7 - high_phase_1_len))  # TODO: Simplify this
-                    patterns.append(pattern)
-                # yield list(pattern)
-
-    return patterns
-
-
-def generate_pattern_1_with_peak(given_prices: List[int], peak_start: int) -> Optional[Pattern]:
-
-    buy_price = given_prices[0]
-    predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
-    probability = 1
-
-    probability *= generate_decreasing_random_price(given_prices, predicted_prices, start=2,
-                                                    length=peak_start-2, start_rate_min=0.85, start_rate_max=0.9,
-                                                    rate_decay_min=0.03, rate_decay_max=0.05)
-    if probability == 0:
-        return None
-
-    #  Now each day is independent of next
-    min_randoms = [0.9, 1.4, 2.0, 1.4, 0.9, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
-    max_randoms = [1.4, 2.0, 6.0, 2.0, 1.4, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
-    for i in range(peak_start, 14):
-
-        probability *= generate_individual_random_price(given_prices, predicted_prices, start=i,
-                                                        length=1, rate_min=min_randoms[i - peak_start],
-                                                        rate_max=max_randoms[i - peak_start])
+        # High Phase 1
+        probability *= self.generate_individual_random_price(given_prices, predicted_prices, start=2, length=high_phase_1_len,
+                                                        rate_min=0.9, rate_max=1.4)
         if probability == 0:
             return None
 
-    return Pattern(description=pattern_definitions.descriptions[1],  # "Huge Spike",#"decreasing, high spike, random lows",
-                   number=1,
-                   prices=predicted_prices,
-                   probability=probability)
+        # Dec Phase 1
+        probability *= self.generate_decreasing_random_price(given_prices, predicted_prices, start=2 + high_phase_1_len,
+                                                        length=dec_phase_1_len, start_rate_min=0.6, start_rate_max=0.8,
+                                                        rate_decay_min=0.04, rate_decay_max=0.1)
+        if probability == 0:
+            return None
+
+        # High Phase 2
+        probability *= self.generate_individual_random_price(given_prices, predicted_prices,
+                                                        start=2 + high_phase_1_len + dec_phase_1_len,
+                                                        length=high_phase_2_len, rate_min=0.9, rate_max=1.4)
+        if probability == 0:
+            return None
+
+        # Dec Phase 2
+        probability *= self.generate_decreasing_random_price(given_prices, predicted_prices,
+                                                        start=2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len,
+                                                        length=dec_phase_2_len, start_rate_min=0.6, start_rate_max=0.8,
+                                                        rate_decay_min=0.04, rate_decay_max=0.1)
+        if probability == 0:
+            return None
+
+        # High Phase 3
+        if 2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len + dec_phase_2_len + high_phase_3_len != 14:
+            raise InconsistentPhaseLengths("Phase lengths don't add up")
+
+        prev_length = 2 + high_phase_1_len + dec_phase_1_len + high_phase_2_len + dec_phase_2_len
+        probability *= self.generate_individual_random_price(given_prices, predicted_prices,
+                                                        start=prev_length, length=14-prev_length,
+                                                        rate_min=0.9, rate_max=1.4)
+        if probability == 0:
+            return None
+
+        return Pattern(description=pattern_definitions.descriptions[0],  #"Roller Coaster",#"high, decreasing, high, decreasing, high",
+                       number=0,
+                       prices=predicted_prices,
+                       probability=probability)
 
 
-def generate_pattern_1(given_prices: List[int], adjust_prob=True) -> List[Pattern]:
+    def generate_pattern_0(self, given_prices: List[int], adjust_prob=True) -> List[Pattern]:
 
-    patterns = []
-    for peak_start in range(3, 10):
-        pattern = generate_pattern_1_with_peak(given_prices, peak_start)
+        patterns = []
+        for dec_phase_1_len in range(2, 4):  # dec_phase_1_len
+            for high_phase_1_len in range(0, 7):  # high_phase_1_len
+                for high_phase_3_len in range(0, (7 - high_phase_1_len - 1 + 1)):
+                    pattern = self.generate_pattern_0_with_lengths(given_prices, high_phase_1_len, dec_phase_1_len, 7 - high_phase_1_len - high_phase_3_len, 5 - dec_phase_1_len, high_phase_3_len)
+                    if pattern is not None:
+                        if adjust_prob:
+                            pattern.adjust_probability(1 / (4 - 2) / 7 / (7 - high_phase_1_len))  # TODO: Simplify this
+                        patterns.append(pattern)
+                    # yield list(pattern)
 
-        if pattern is not None:
-            if adjust_prob:
-                pattern.adjust_probability(1/(10-3))  # TODO: Simplify this
-            patterns.append(pattern)
-    return patterns
-
-
-def generate_pattern_2(given_prices: List[int]) -> List[Pattern]:
-
-    buy_price = given_prices[0]
-    predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
-    probability = 1
-
-    probability *= generate_decreasing_random_price(given_prices, predicted_prices, start=2,
-                                                    length=14 - 2, start_rate_min=0.85, start_rate_max=0.9,
-                                                    rate_decay_min=0.03, rate_decay_max=0.05)
-    if probability == 0:
-        return []
-
-    pattern = Pattern(description=pattern_definitions.descriptions[2],  #"Always Decreasing",
-                      number=2,
-                      prices=predicted_prices,
-                      probability=probability)
-    return [pattern]
+        return patterns
 
 
-def generate_pattern_3_with_peak(given_prices: List[int], peak_start: int) -> Optional[Pattern]:
-    # PATTERN 3: decreasing, spike, decreasing
+    def generate_pattern_1_with_peak(self, given_prices: List[int], peak_start: int) -> Optional[Pattern]:
 
-    buy_price = given_prices[0]
-    predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
-    probability = 1
+        buy_price = given_prices[0]
+        predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
+        probability = 1
 
-    probability *= generate_decreasing_random_price(given_prices, predicted_prices, start=2,
-                                                    length=peak_start - 2, start_rate_min=0.4, start_rate_max=0.9,
-                                                    rate_decay_min=0.03, rate_decay_max=0.05)
-    if probability == 0:
-        return None
-
-    # The Peak
-    probability *= generate_individual_random_price(given_prices, predicted_prices, start=peak_start,
-                                                    length=2, rate_min=0.9, rate_max=1.4)
-    if probability == 0:
-        return None
-
-    probability *= generate_peak_price(given_prices, predicted_prices, start=peak_start+2, rate_min=1.4, rate_max=2.0)
-    if probability == 0:
-        return None
-
-    # The rest of the week
-    if (peak_start + 5) < 14:
-        probability *= generate_decreasing_random_price(given_prices, predicted_prices, start=peak_start+5,
-                                                        length=14-(peak_start+5), start_rate_min=0.4, start_rate_max=0.9,
+        probability *= self.generate_decreasing_random_price(given_prices, predicted_prices, start=2,
+                                                        length=peak_start-2, start_rate_min=0.85, start_rate_max=0.9,
                                                         rate_decay_min=0.03, rate_decay_max=0.05)
         if probability == 0:
             return None
 
-    return Pattern(description=pattern_definitions.descriptions[3],  #"Small Spike",#"decreasing, spike, decreasing",
-                   number=3,
-                   prices=predicted_prices,
-                   probability=probability)
+        #  Now each day is independent of next
+        min_randoms = [0.9, 1.4, 2.0, 1.4, 0.9, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
+        max_randoms = [1.4, 2.0, 6.0, 2.0, 1.4, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9]
+        for i in range(peak_start, 14):
+
+            probability *= self.generate_individual_random_price(given_prices, predicted_prices, start=i,
+                                                            length=1, rate_min=min_randoms[i - peak_start],
+                                                            rate_max=max_randoms[i - peak_start])
+            if probability == 0:
+                return None
+
+        return Pattern(description=pattern_definitions.descriptions[1],  # "Huge Spike",#"decreasing, high spike, random lows",
+                       number=1,
+                       prices=predicted_prices,
+                       probability=probability)
 
 
-def generate_pattern_3(given_prices: List[int], adjust_prob=True) -> List[Pattern]:
-    patterns = []
-    for peak_start in range(2, 10):
-        pattern = generate_pattern_3_with_peak(given_prices, peak_start)
-        if pattern is not None:
-            if adjust_prob:
-                pattern.adjust_probability(1/(10-2))  # TODO: Simplify to constant 0.125
-            patterns.append(pattern)
-    return patterns
+    def generate_pattern_1(self, given_prices: List[int], adjust_prob=True) -> List[Pattern]:
+
+        patterns = []
+        for peak_start in range(3, 10):
+            pattern = self.generate_pattern_1_with_peak(given_prices, peak_start)
+
+            if pattern is not None:
+                if adjust_prob:
+                    pattern.adjust_probability(1/(10-3))  # TODO: Simplify this
+                patterns.append(pattern)
+        return patterns
 
 
-def get_transition_probability(previous_pattern: Optional[int]) -> Dict[int, float]:
-    """Gets a lookup table for probability modifiers for a given previous pattern"""
-    if previous_pattern is None or previous_pattern == -1:
-        return pattern_definitions.probability_matrix[-1]
-    else:
-        return pattern_definitions.probability_matrix[previous_pattern]
+    def generate_pattern_2(self, given_prices: List[int]) -> List[Pattern]:
+
+        buy_price = given_prices[0]
+        predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
+        probability = 1
+
+        probability *= self.generate_decreasing_random_price(given_prices, predicted_prices, start=2,
+                                                        length=14 - 2, start_rate_min=0.85, start_rate_max=0.9,
+                                                        rate_decay_min=0.03, rate_decay_max=0.05)
+        if probability == 0:
+            return []
+
+        pattern = Pattern(description=pattern_definitions.descriptions[2],  #"Always Decreasing",
+                          number=2,
+                          prices=predicted_prices,
+                          probability=probability)
+        return [pattern]
 
 
-def generate_all_patterns(sell_prices: List[int],  previous_pattern: Optional[int] = -1) -> List[Pattern]:
-    """Generates all 4 patterns for a list of prices and a previous pattern"""
-    fx_list = (generate_pattern_0, generate_pattern_1, generate_pattern_2, generate_pattern_3)
-    transition_probability = get_transition_probability(previous_pattern)
+    def generate_pattern_3_with_peak(self, given_prices: List[int], peak_start: int) -> Optional[Pattern]:
+        # PATTERN 3: decreasing, spike, decreasing
 
-    patterns = []
-    for i, fx in enumerate(fx_list):
-        patterns.extend(multiply_pattern_probability(fx(sell_prices), transition_probability[i]))
-        # patterns.extend(fx(sell_prices))
+        buy_price = given_prices[0]
+        predicted_prices = [MinMaxPrice(buy_price, buy_price, buy_price), MinMaxPrice(buy_price, buy_price, buy_price)]
+        probability = 1
 
-    return patterns
+        probability *= self.generate_decreasing_random_price(given_prices, predicted_prices, start=2,
+                                                        length=peak_start - 2, start_rate_min=0.4, start_rate_max=0.9,
+                                                        rate_decay_min=0.03, rate_decay_max=0.05)
+        if probability == 0:
+            return None
 
-    # yield from (
-    #     multiply_pattern_probability(fx(sell_prices), transition_probability[i])
-    #     for
-    #     i, fx in enumerate(fx_list)
-    # )
+        # The Peak
+        probability *= self.generate_individual_random_price(given_prices, predicted_prices, start=peak_start,
+                                                        length=2, rate_min=0.9, rate_max=1.4)
+        if probability == 0:
+            return None
+
+        probability *= self.generate_peak_price(given_prices, predicted_prices, start=peak_start+2, rate_min=1.4, rate_max=2.0)
+        if probability == 0:
+            return None
+
+        # The rest of the week
+        if (peak_start + 5) < 14:
+            probability *= self.generate_decreasing_random_price(given_prices, predicted_prices, start=peak_start+5,
+                                                            length=14-(peak_start+5), start_rate_min=0.4, start_rate_max=0.9,
+                                                            rate_decay_min=0.03, rate_decay_max=0.05)
+            if probability == 0:
+                return None
+
+        return Pattern(description=pattern_definitions.descriptions[3],  #"Small Spike",#"decreasing, spike, decreasing",
+                       number=3,
+                       prices=predicted_prices,
+                       probability=probability)
 
 
-def generate_possibilities(sell_prices: List, previous_pattern: Optional[int] = -1, first_buy: bool = False) -> List[Pattern]:
-    """Returns a generator of all potential possibilities for the given criteria."""
+    def generate_pattern_3(self, given_prices: List[int], adjust_prob=True) -> List[Pattern]:
+        patterns = []
+        for peak_start in range(2, 10):
+            pattern = self.generate_pattern_3_with_peak(given_prices, peak_start)
+            if pattern is not None:
+                if adjust_prob:
+                    pattern.adjust_probability(1/(10-2))  # TODO: Simplify to constant 0.125
+                patterns.append(pattern)
+        return patterns
 
-    if sell_prices[0] is not None and not first_buy:
-        return generate_all_patterns(sell_prices, previous_pattern)
 
-    else:
-        _possibilities = []
-        for _buy_price in range(90, 111):
-            sell_prices[0] = sell_prices[1] = _buy_price
-            if first_buy:
-                _possibilities.extend(generate_pattern_3(sell_prices))
-            else:
-                _possibilities.extend(generate_all_patterns(sell_prices, previous_pattern))
+    def get_transition_probability(self, previous_pattern: Optional[int]) -> Dict[int, float]:
+        """Gets a lookup table for probability modifiers for a given previous pattern"""
+        if previous_pattern is None or previous_pattern == -1:
+            return pattern_definitions.probability_matrix[-1]
+        else:
+            return pattern_definitions.probability_matrix[previous_pattern]
 
-        return _possibilities
+
+    def generate_all_patterns(self, sell_prices: List[int],  previous_pattern: Optional[int] = -1) -> List[Pattern]:
+        """Generates all 4 patterns for a list of prices and a previous pattern"""
+        fx_list = (self.generate_pattern_0, self.generate_pattern_1, self.generate_pattern_2, self.generate_pattern_3)
+        transition_probability = self.get_transition_probability(previous_pattern)
+
+        patterns = []
+        for i, fx in enumerate(fx_list):
+            patterns.extend(self.multiply_pattern_probability(fx(sell_prices), transition_probability[i]))
+            # patterns.extend(fx(sell_prices))
+
+        return patterns
+
+        # yield from (
+        #     multiply_pattern_probability(fx(sell_prices), transition_probability[i])
+        #     for
+        #     i, fx in enumerate(fx_list)
+        # )
+
+
+    def generate_possibilities(self, sell_prices: List, previous_pattern: Optional[int] = -1, first_buy: bool = False) -> List[Pattern]:
+        """Returns a generator of all potential possibilities for the given criteria."""
+
+        if sell_prices[0] is not None and not first_buy:
+            return self.generate_all_patterns(sell_prices, previous_pattern)
+
+        else:
+            _possibilities = []
+            for _buy_price in range(90, 111):
+                sell_prices[0] = sell_prices[1] = _buy_price
+                if first_buy:
+                    _possibilities.extend(self.generate_pattern_3(sell_prices))
+                else:
+                    _possibilities.extend(self.generate_all_patterns(sell_prices, previous_pattern))
+
+            return _possibilities
 
 
 def analyze_possibilities(sell_prices: List, previous_pattern: Optional[int] = -1, first_buy: bool = False) -> Tuple[List[Pattern], Optional[OverallPatternData]]:
     """Computes and analyzes the possible patterns and their probabilities."""
-    generated_possibilities = generate_possibilities(sell_prices, previous_pattern, first_buy)
+    pattern_generator = PredictPatterns()
+    generated_possibilities = []
+
+    for i in range(6):  # Iterate over possible fudge factors until we produce a match.
+        pattern_generator.fudge_factor = i
+        generated_possibilities = pattern_generator.generate_possibilities(sell_prices, previous_pattern, first_buy)
+        if len(generated_possibilities) > 0:
+            log.info(f"Generated {len(generated_possibilities)} possibility using a fudge factor of {i}")
+            break
 
   #   js_poss = [
   # 2.1504873407530748e-10,
@@ -1226,6 +1238,7 @@ def analyze_possibilities(sell_prices: List, previous_pattern: Optional[int] = -
 # ]
 
     if len(generated_possibilities) == 0:
+        log.info(f"Unable to find any predictions for: {sell_prices} \n w/ prev pat: {previous_pattern}")
         return [], None
 
     # for i in range (len(js_poss)):
@@ -1665,6 +1678,12 @@ def weird_test():
     return sell_price
 
 
+def no_findy():
+    # return [110, 110, 86, 81, 96, None, 126, None, 182, None, None, None, None, None]
+    return [110, 110, 86, 81, 96, None, 126, None, None, None, None, None, None, None]
+
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] [%(name)s] [%(levelname)s] %(message)s")
 
@@ -1684,15 +1703,15 @@ if __name__ == '__main__':
     # sell_price.append(160)
     # sell_price.append(98)
 
-    buy_price = 100
+    buy_price = None#100
     # buy_price = 90
     sell_price = [buy_price, buy_price]
 
 
-    sell_price.append(109)
+    # sell_price.append(109)
     # sell_price.append(None)  # 70)
     # sell_price.append(104)
-    sell_price = weird_test()
+    sell_price = weird_test() #no_findy() #large_spike_test()#w
     sell_price = fix_sell_prices_length(sell_price)
     prev_pattern = 2#2 #pattern_definitions.huge_spike  # 1
 
@@ -1711,9 +1730,9 @@ if __name__ == '__main__':
 
     # test_graph()
     #
-
-    for i, prob in enumerate(other_data.total_probabilities):
-        log.info(f"{prob*100}% chance of a {pattern_definitions.name(i)} pattern")
+    if len(possibilities) > 0:
+        for i, prob in enumerate(other_data.total_probabilities):
+            log.info(f"{prob*100}% chance of a {pattern_definitions.name(i)} pattern")
 
     # for prediction in possibilities:
     #     # desc.append(prediction.description)
